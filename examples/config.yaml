@@ -1,0 +1,43 @@
+AppName: example
+Version: "1"
+ExternalService:
+  Example:
+    Host: "http://localhost:8080"
+Server:
+  Environment: "dev"
+  SkipTLSVerify: true
+  Timeout:
+    Server: 10
+    Read: 10
+    Write: 10
+    Idle: 30
+  Duration: 10
+  Endpoint:
+    Based: "/"
+  JWT:
+    PrivateKey: ""
+    PublicKey: ""
+REST:
+  Host: "0.0.0.0"
+  Port: "8080"
+GRPC:
+  Host: "0.0.0.0"
+  Port: "8081"
+Kafka:
+  Brokers: ["localhost:9092"]
+  GroupID: "item-consumer"
+  Topic: "items"
+Database:
+  Host: ""
+  Port: ""
+  User: ""
+  Password: ""
+  DBName: ""
+  MigrationPath: "file://migrations"
+  DirtyStrategy: "retry"
+LogTarget:
+  Path: "./log"
+  FileName: "app.log"
+  PerLevelFiles: {}
+  VerboseLevel: "DEBUG"
+  AlsoLogToStdout: true

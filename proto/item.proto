@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package pb;
+
+option go_package = "project-template/pb";
+
+message Empty {}
+
+message Item {
+  int32 id = 1;
+  string name = 2;
+}
+
+message ItemID {
+  int32 id = 1;
+}
+
+message ItemList {
+  repeated Item items = 1;
+}
+
+service ItemService {
+  rpc CreateItem(Item) returns (Item);
+  rpc ListItems(Empty) returns (ItemList);
+  rpc GetItem(ItemID) returns (Item);
+  rpc UpdateItem(Item) returns (Item);
+  rpc DeleteItem(ItemID) returns (Empty);
+}

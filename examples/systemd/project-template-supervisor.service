@@ -1,0 +1,15 @@
+[Unit]
+Description=Project Template Supervisor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=user
+RuntimeDirectory=project-template
+RuntimeDirectoryMode=0775
+ExecStart=/usr/local/bin/project-template-supervisor-mvc
+Environment=SUPERVISOR_SOCKET=/run/project-template/project-template-supervisor.sock
+
+[Install]
+WantedBy=multi-user.target

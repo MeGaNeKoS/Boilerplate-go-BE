@@ -1,0 +1,21 @@
+[Unit]
+Description=Project Template Temporary Service
+Requires=project-template.socket
+After=network.target
+
+[Service]
+Type=notify
+User=user
+Group=user
+NotifyAccess=all
+ExecStart=/usr/local/bin/project-template --config /etc/project-template/config.yaml
+Environment=SYSTEMD_SOCKET_ACTIVATION=true
+Environment=SUPERVISOR_SOCKET=/run/project-template/project-template-supervisor.sock
+Environment=SELF_SERVICE_UNIT=%n
+Environment=TEMP_SERVICE=true
+Sockets=project-template.socket
+Restart=on-failure
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

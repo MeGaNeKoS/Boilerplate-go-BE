@@ -1,0 +1,24 @@
+[Unit]
+Description=Project Template Example Service
+# Requires=project-template.socket
+After=network.target
+
+[Service]
+Type=notify
+User=user
+Group=user
+NotifyAccess=all
+ExecStart=/usr/local/bin/project-template --config /etc/project-template/config.yaml
+# The following lines enable supervision via project-template-supervisor.service
+# Uncomment them along with Requires=project-template.socket above
+# to run with socket activation so both instances can listen on the same port
+# Environment=SYSTEMD_SOCKET_ACTIVATION=true
+# Environment=SUPERVISOR_SOCKET=/run/project-template/project-template-supervisor.sock
+# Environment=TEMP_SERVICE_UNIT=project-template-temp.service
+# Environment=SELF_SERVICE_UNIT=%n
+# Sockets=project-template.socket
+Restart=on-failure
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS item_details;
+DROP TABLE IF EXISTS items;
