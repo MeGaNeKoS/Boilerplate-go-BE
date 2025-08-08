@@ -54,7 +54,7 @@ func setupServer(t *testing.T) (pb.ItemServiceClient, sqlmock.Sqlmock, string) {
 	t.Cleanup(patchLogger.Unpatch)
 
 	patchHTTP := monkey.PatchInstanceMethod(reflect.TypeOf(&transport.HTTPOutbound{}), "SendHTTPRequest", func(_ *transport.HTTPOutbound, _ logger.Logger) (response.HttpResponse, *codepkg.Code) {
-		return response.HttpResponse{HTTPCode: http.StatusOK, RawResponsePayload: &response.GenericResponse{}}, nil
+		return response.HttpResponse{HTTPCode: http.StatusOK, RawResponsePayload: &response.GenericResponse[any]{}}, nil
 	})
 	t.Cleanup(patchHTTP.Unpatch)
 

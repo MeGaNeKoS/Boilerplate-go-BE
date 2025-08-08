@@ -2,6 +2,7 @@ package utils
 
 import (
 	"net/http"
+	"reflect"
 	"testing"
 
 	"project-template/infrastructure/config"
@@ -11,67 +12,60 @@ import (
 
 func TestGenerateErrorResponse(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	err := code.Code{HTTPCode: http.StatusBadRequest, InternalCode: 123, Message: "bad"}
+	err := &code.Code{HTTPCode: http.StatusBadRequest, InternalCode: 123, Message: "bad"}
 	resp := GenerateErrorResponse(err)
 	if resp.HTTPCode != http.StatusBadRequest {
 		t.Fatalf("HTTPCode got %d want %d", resp.HTTPCode, http.StatusBadRequest)
 	}
-	generic, ok := resp.RawResponsePayload.(response.GenericResponse)
+	pd, ok := resp.RawResponsePayload.(response.ProblemDetail)
 	if !ok {
 		t.Fatalf("unexpected payload type %T", resp.RawResponsePayload)
 	}
-	expectedStatus := "APP-ERR-123"
-	if generic.StatusCode != expectedStatus {
-		t.Errorf("status code got %q want %q", generic.StatusCode, expectedStatus)
+	expectedCode := "APP-ERR-123"
+	if pd.Code != expectedCode {
+		t.Errorf("code got %q want %q", pd.Code, expectedCode)
 	}
-	if generic.ReturnMessage != "bad" {
-		t.Errorf("message got %q want %q", generic.ReturnMessage, "bad")
+	if pd.Title != "bad" {
+		t.Errorf("title got %q want %q", pd.Title, "bad")
+	}
+	if resp.ContentType != "application/problem+json" {
+		t.Errorf("content type %q", resp.ContentType)
 	}
 }
 
 func TestGenerateErrorResponseOverride(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	err := code.Code{HTTPCode: http.StatusBadRequest, InternalCode: 1, Message: "bad"}
+	err := &code.Code{HTTPCode: http.StatusBadRequest, InternalCode: 1, Message: "bad"}
 	resp := GenerateErrorResponse(err, "oops")
-	g := resp.RawResponsePayload.(response.GenericResponse)
-	if g.ReturnMessage != "oops" {
+	pd := resp.RawResponsePayload.(response.ProblemDetail)
+	if pd.Title != "oops" {
 		t.Fatalf("override failed")
 	}
 }
 
-func TestGenerateSuccessResponse(t *testing.T) {
-	config.Cfg = &config.Config{AppName: "APP"}
-	body := map[string]string{"x": "y"}
-	resp := GenerateSuccessResponse(body)
-	if resp.HTTPCode != http.StatusOK {
-		t.Fatalf("HTTPCode got %d want %d", resp.HTTPCode, http.StatusOK)
+func TestGenerateResponse(t *testing.T) {
+	body := map[string]string{"ok": "true"}
+	resp := GenerateResponse(http.StatusCreated, body, "")
+	if resp.HTTPCode != http.StatusCreated {
+		t.Fatalf("status got %d want %d", resp.HTTPCode, http.StatusCreated)
 	}
-	generic, ok := resp.RawResponsePayload.(response.GenericResponse)
-	if !ok {
-		t.Fatalf("unexpected payload type %T", resp.RawResponsePayload)
+	if resp.ContentType != "application/json" {
+		t.Fatalf("default content type got %q", resp.ContentType)
 	}
-	if generic.StatusCode != "APP-200" {
-		t.Errorf("status code got %q want %q", generic.StatusCode, "APP-200")
-	}
-	if generic.ReturnMessage != "Success" {
-		t.Errorf("message got %q want %q", generic.ReturnMessage, "Success")
-	}
-	gotBody, ok := generic.Body.(map[string]string)
-	if !ok || gotBody["x"] != "y" {
-		t.Errorf("body got %#v", generic.Body)
+	got, ok := resp.RawResponsePayload.(map[string]string)
+	if !ok || !reflect.DeepEqual(got, body) {
+		t.Fatalf("payload mismatch")
 	}
 }
 
-func TestGenerateSuccessResponseOpts(t *testing.T) {
-	config.Cfg = &config.Config{AppName: "APP"}
-	code := 201
-	msg := "created"
-	resp := GenerateSuccessResponse(nil, &SuccessOptions{HTTPCode: &code, Message: &msg})
-	if resp.HTTPCode != 201 {
-		t.Fatalf("HTTPCode got %d want 201", resp.HTTPCode)
+func TestGenerateResponseCustomType(t *testing.T) {
+	payload := []byte("data")
+	resp := GenerateResponse(http.StatusOK, payload, "text/plain")
+	if resp.ContentType != "text/plain" {
+		t.Fatalf("content type got %q", resp.ContentType)
 	}
-	generic := resp.RawResponsePayload.(response.GenericResponse)
-	if generic.ReturnMessage != msg {
-		t.Errorf("message got %q want %q", generic.ReturnMessage, msg)
+	b, ok := resp.RawResponsePayload.([]byte)
+	if !ok || string(b) != "data" {
+		t.Fatalf("payload mismatch")
 	}
 }

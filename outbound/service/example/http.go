@@ -41,7 +41,7 @@ func (o *exampleOutbound) FetchItemByID(ctx context.Context, id int) (models.Ite
 		Path:     fmt.Sprintf("/items/%d", id),
 		Method:   http.MethodGet,
 		Headers:  o.headers(ctx),
-		Response: &response.GenericResponse{},
+		Response: &response.GenericResponse[any]{},
 	}
 
 	resp, code := req.SendHTTPRequest(o.log)
@@ -49,7 +49,7 @@ func (o *exampleOutbound) FetchItemByID(ctx context.Context, id int) (models.Ite
 		return models.Item{}, fmt.Errorf("external request failed: %s", code.Message)
 	}
 
-	generic, ok := resp.RawResponsePayload.(*response.GenericResponse)
+	generic, ok := resp.RawResponsePayload.(*response.GenericResponse[any])
 	if !ok {
 		return models.Item{}, fmt.Errorf("unexpected response type")
 	}
@@ -78,7 +78,7 @@ func (o *exampleOutbound) FetchItemByFilter(ctx context.Context, filter string) 
 		Path:     path,
 		Method:   http.MethodGet,
 		Headers:  o.headers(ctx),
-		Response: &response.GenericResponse{},
+		Response: &response.GenericResponse[any]{},
 	}
 
 	resp, code := req.SendHTTPRequest(o.log)
@@ -86,7 +86,7 @@ func (o *exampleOutbound) FetchItemByFilter(ctx context.Context, filter string) 
 		return nil, fmt.Errorf("external request failed: %s", code.Message)
 	}
 
-	generic, ok := resp.RawResponsePayload.(*response.GenericResponse)
+	generic, ok := resp.RawResponsePayload.(*response.GenericResponse[any])
 	if !ok {
 		return nil, fmt.Errorf("unexpected response type")
 	}

@@ -33,7 +33,9 @@ func TestFetchItemByIDAdditionalErrors(t *testing.T) {
 
 	// marshal error
 	monkey.PatchInstanceMethod(reflect.TypeOf(&transport.HTTPOutbound{}), "SendHTTPRequest", func(*transport.HTTPOutbound, logger.Logger) (response.HttpResponse, *codepkg.Code) {
-		return response.HttpResponse{RawResponsePayload: &response.GenericResponse{Body: struct{}{}}}, nil
+		gr := &response.GenericResponse[any]{}
+		gr.Body = struct{}{}
+		return response.HttpResponse{RawResponsePayload: gr}, nil
 	})
 	monkey.Patch(json.Marshal, func(any) ([]byte, error) { return nil, errors.New("m") })
 	_, err = o.FetchItemByID(context.Background(), 2)
@@ -45,7 +47,9 @@ func TestFetchItemByIDAdditionalErrors(t *testing.T) {
 
 	// unmarshal error
 	monkey.PatchInstanceMethod(reflect.TypeOf(&transport.HTTPOutbound{}), "SendHTTPRequest", func(*transport.HTTPOutbound, logger.Logger) (response.HttpResponse, *codepkg.Code) {
-		return response.HttpResponse{RawResponsePayload: &response.GenericResponse{Body: map[string]any{}}}, nil
+		gr := &response.GenericResponse[any]{}
+		gr.Body = map[string]any{}
+		return response.HttpResponse{RawResponsePayload: gr}, nil
 	})
 	monkey.Patch(json.Marshal, func(any) ([]byte, error) { return []byte("{}"), nil })
 	monkey.Patch(json.Unmarshal, func([]byte, any) error { return errors.New("u") })
@@ -75,7 +79,9 @@ func TestFetchItemByFilterAdditionalErrors(t *testing.T) {
 
 	// marshal error
 	monkey.PatchInstanceMethod(reflect.TypeOf(&transport.HTTPOutbound{}), "SendHTTPRequest", func(*transport.HTTPOutbound, logger.Logger) (response.HttpResponse, *codepkg.Code) {
-		return response.HttpResponse{RawResponsePayload: &response.GenericResponse{Body: struct{}{}}}, nil
+		gr := &response.GenericResponse[any]{}
+		gr.Body = struct{}{}
+		return response.HttpResponse{RawResponsePayload: gr}, nil
 	})
 	monkey.Patch(json.Marshal, func(any) ([]byte, error) { return nil, errors.New("m") })
 	_, err = o.FetchItemByFilter(context.Background(), "f")
@@ -87,7 +93,9 @@ func TestFetchItemByFilterAdditionalErrors(t *testing.T) {
 
 	// unmarshal error
 	monkey.PatchInstanceMethod(reflect.TypeOf(&transport.HTTPOutbound{}), "SendHTTPRequest", func(*transport.HTTPOutbound, logger.Logger) (response.HttpResponse, *codepkg.Code) {
-		return response.HttpResponse{RawResponsePayload: &response.GenericResponse{Body: []any{}}}, nil
+		gr := &response.GenericResponse[any]{}
+		gr.Body = []any{}
+		return response.HttpResponse{RawResponsePayload: gr}, nil
 	})
 	monkey.Patch(json.Marshal, func(any) ([]byte, error) { return []byte("[]"), nil })
 	monkey.Patch(json.Unmarshal, func([]byte, any) error { return errors.New("u") })

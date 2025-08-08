@@ -4,29 +4,26 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/danielgtaylor/huma/v2"
+	humachi "github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 )
 
 func TestSystemRouter(t *testing.T) {
 	r := chi.NewRouter()
-	SystemRouter(r)
-	var cnt int
-	var routes []string
+	api := humachi.New(r, huma.DefaultConfig("x", "1"))
+	SystemRouter(huma.NewGroup(api, ""))
+	got := map[string]bool{}
 	err := chi.Walk(r, func(method string, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
-		cnt++
-		routes = append(routes, method+" "+route)
+		got[method+" "+route] = true
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cnt != 3 {
-		t.Fatalf("routes %d", cnt)
-	}
-	expected := map[string]bool{"GET /echo": true, "GET /crash": true, "GET /long": true}
-	for _, rt := range routes {
-		if !expected[rt] {
-			t.Fatalf("unexpected %s", rt)
+	for _, e := range []string{"GET /echo", "GET /crash", "GET /long"} {
+		if !got[e] {
+			t.Fatalf("missing %s", e)
 		}
 	}
 }

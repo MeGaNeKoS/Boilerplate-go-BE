@@ -1,79 +1,117 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
+	"github.com/danielgtaylor/huma/v2/humatest"
+
 	"project-template/infrastructure/config"
+	"project-template/infrastructure/dto/response"
+	systemdto "project-template/infrastructure/dto/system"
 	"project-template/pkg/code"
+	"project-template/server/rest/handlers/resthuma"
 )
 
-func TestEchoCrashAndLongHandlers(t *testing.T) {
+type mockSystemService struct {
+	echo  func(context.Context) (any, *code.Code)
+	crash func(context.Context)
+	long  func(context.Context, int) (any, *code.Code)
+}
+
+func (m mockSystemService) Echo(ctx context.Context) (any, *code.Code) {
+	if m.echo != nil {
+		return m.echo(ctx)
+	}
+	return nil, nil
+}
+
+func (m mockSystemService) Crash(ctx context.Context) {
+	if m.crash != nil {
+		m.crash(ctx)
+	}
+}
+
+func (m mockSystemService) Long(ctx context.Context, s int) (any, *code.Code) {
+	if m.long != nil {
+		return m.long(ctx, s)
+	}
+	return nil, nil
+}
+
+func decodeSys[T any](t *testing.T, resp *resthuma.Response[*response.GenericResponse[T]]) response.GenericResponse[T] {
+	rec := httptest.NewRecorder()
+	ctx := humatest.NewContext(nil, httptest.NewRequest(http.MethodGet, "/", nil), rec)
+	resp.Body(ctx)
+	var out response.GenericResponse[T]
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return out
+}
+
+func TestEcho(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	rec := httptest.NewRecorder()
-
-	EchoHandler(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("code %d", rec.Code)
-	}
-	if !bytes.Contains(rec.Body.Bytes(), []byte("echo")) {
-		t.Fatalf("bad body")
-	}
-
-	rec = httptest.NewRecorder()
-	LongHandler(rec, httptest.NewRequest(http.MethodGet, "/?sleep=0", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("code %d", rec.Code)
-	}
-
-	defer func() { recover() }()
-	CrashHandler(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-}
-
-// stubSystemService allows forcing handlers into the error branches.
-type stubSystemService struct {
-	echoCode *code.Code
-	longCode *code.Code
-}
-
-func (s stubSystemService) Echo(ctx context.Context) (interface{}, *code.Code) {
-	return nil, s.echoCode
-}
-
-func (stubSystemService) Crash(ctx context.Context) {}
-
-func (s stubSystemService) Long(ctx context.Context, _ int) (interface{}, *code.Code) {
-	return nil, s.longCode
-}
-
-// TestEchoHandlerError exercises the error handling path of EchoHandler.
-func TestEchoHandlerError(t *testing.T) {
 	orig := systemService
-	systemService = stubSystemService{echoCode: &code.ErrInternalServerError}
+	systemService = mockSystemService{echo: func(context.Context) (any, *code.Code) { return "ok", nil }}
 	defer func() { systemService = orig }()
-
-	rec := httptest.NewRecorder()
-	EchoHandler(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("code %d", rec.Code)
+	resp, err := Echo(context.Background(), &resthuma.Empty{})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	out := decodeSys(t, resp)
+	if out.Body != "ok" {
+		t.Fatalf("body %#v", out.Body)
 	}
 }
 
-// TestLongHandlerError exercises the error handling path of LongHandler.
-func TestLongHandlerError(t *testing.T) {
+func TestEchoError(t *testing.T) {
 	orig := systemService
-	systemService = stubSystemService{longCode: &code.ErrInternalServerError}
+	systemService = mockSystemService{echo: func(context.Context) (any, *code.Code) { return nil, code.ErrInternalServerError }}
 	defer func() { systemService = orig }()
+	if _, err := Echo(context.Background(), &resthuma.Empty{}); err == nil {
+		t.Fatalf("expected error")
+	}
+}
 
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/?sleep=0", nil)
-	LongHandler(rec, req)
+func TestCrash(t *testing.T) {
+	orig := systemService
+	systemService = mockSystemService{crash: func(context.Context) { panic("boom") }}
+	defer func() { systemService = orig }()
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("expected panic")
+		}
+	}()
+	_, _ = Crash(context.Background(), &resthuma.Empty{})
+}
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("code %d", rec.Code)
+func TestLong(t *testing.T) {
+	config.Cfg = &config.Config{AppName: "APP"}
+	pid := fmt.Sprintf("%d", os.Getpid())
+	orig := systemService
+	systemService = mockSystemService{long: func(context.Context, int) (any, *code.Code) { return pid, nil }}
+	defer func() { systemService = orig }()
+	resp, err := Long(context.Background(), &systemdto.LongInput{Sleep: 0})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	out := decodeSys(t, resp)
+	if out.Body != pid {
+		t.Fatalf("body %#v", out.Body)
+	}
+}
+
+func TestLongError(t *testing.T) {
+	orig := systemService
+	systemService = mockSystemService{long: func(context.Context, int) (any, *code.Code) { return nil, code.ErrInternalServerError }}
+	defer func() { systemService = orig }()
+	if _, err := Long(context.Background(), &systemdto.LongInput{Sleep: 0}); err == nil {
+		t.Fatalf("expected error")
 	}
 }

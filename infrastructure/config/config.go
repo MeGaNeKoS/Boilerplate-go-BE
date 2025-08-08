@@ -22,6 +22,7 @@ type Config struct {
 	Kafka     KafkaConfig    `yaml:"Kafka"`
 	Database  DatabaseConfig `yaml:"Database"`
 	LogTarget LogConfig      `yaml:"LogTarget"`
+	OpenAPI   OpenAPIConfig  `yaml:"OpenAPI"`
 }
 
 type Service struct {
@@ -91,6 +92,16 @@ type LogConfig struct {
 	PerLevelFiles   map[string]string `yaml:"PerLevelFiles"`
 	VerboseLevel    string            `yaml:"VerboseLevel"`
 	AlsoLogToStdout bool              `yaml:"AlsoLogToStdout"`
+}
+
+type OpenAPIConfig struct {
+	Version string     `yaml:"Version"`
+	Docs    DocsConfig `yaml:"Docs"`
+}
+
+type DocsConfig struct {
+	Public   string `yaml:"Public"`
+	Internal string `yaml:"Internal"`
 }
 
 // Cfg holds the loaded application configuration.

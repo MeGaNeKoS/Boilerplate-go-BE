@@ -2,139 +2,98 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"io"
+	"fmt"
 	"net/http"
-	"strconv"
 
-	"github.com/go-chi/chi/v5"
-
-	models "project-template/infrastructure/dto/item"
+	dtoitem "project-template/infrastructure/dto/item"
+	"project-template/infrastructure/dto/response"
 	"project-template/infrastructure/utils"
 	"project-template/outbound"
 	"project-template/pkg/code"
-       repoitem "project-template/repositories/item"
-       services "project-template/services/item"
+	repoitem "project-template/repositories/item"
+	"project-template/server/rest/handlers/resthuma"
+	itemservice "project-template/services/item"
 )
 
 type repository interface {
 	GetItemRepository() repoitem.Repository
 }
 
-func serviceFromContext(ctx context.Context) services.ServiceImpl {
+func serviceFromContext(ctx context.Context) itemservice.ServiceImpl {
 	r, _ := utils.GetRepoCtx(ctx).(repository)
 	out, _ := utils.GetOutboundCtx(ctx).(outbound.Impl)
 	log := utils.GetLoggerFromContext(ctx)
 	if r == nil || out == nil || log == nil {
 		return nil
 	}
-	return services.NewService(r.GetItemRepository(), out.Example().HTTP(), log)
+	return itemservice.NewService(r.GetItemRepository(), out.Example().HTTP(), log)
 }
 
-func ListItemsHandler(w http.ResponseWriter, r *http.Request) {
-	svc := serviceFromContext(r.Context())
+// ListItems lists all items.
+func ListItems(ctx context.Context, in *dtoitem.ListItemsInput) (*resthuma.Response[*response.GenericResponse[[]dtoitem.Item]], error) {
+	svc := serviceFromContext(ctx)
 	if svc == nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrInternalServerError))
-		return
+		return nil, resthuma.NewError(code.ErrInternalServerError)
 	}
-	list, codeErr := svc.ListItems(r.Context())
-	if codeErr != nil {
-		sendResponse(w, utils.GenerateErrorResponse(*codeErr))
-		return
+	if in != nil {
+		_, _ = in.Debug, in.Token
 	}
-	sendResponse(w, utils.GenerateSuccessResponse(list))
+	list, errCode := svc.ListItems(ctx)
+	if errCode != nil {
+		return nil, resthuma.NewError(errCode)
+	}
+	return resthuma.SuccessResponse(http.StatusOK, list), nil
 }
 
-func CreateItemHandler(w http.ResponseWriter, r *http.Request) {
-	svc := serviceFromContext(r.Context())
+// CreateItem creates a new item.
+func CreateItem(ctx context.Context, in *dtoitem.CreateItemInput) (*resthuma.Response[*response.GenericResponse[dtoitem.Item]], error) {
+	svc := serviceFromContext(ctx)
 	if svc == nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrInternalServerError))
-		return
+		return nil, resthuma.NewError(code.ErrInternalServerError)
 	}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrInternalServerError))
-		return
+	created, errCode := svc.CreateItem(ctx, in.Body)
+	if errCode != nil {
+		return nil, resthuma.NewError(errCode)
 	}
-	var req models.Item
-	if err := json.Unmarshal(body, &req); err != nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrPayloadError, err.Error()))
-		return
-	}
-	created, codeErr := svc.CreateItem(r.Context(), req)
-	if codeErr != nil {
-		sendResponse(w, utils.GenerateErrorResponse(*codeErr))
-		return
-	}
-	sendResponse(w, utils.GenerateSuccessResponse(created, nil))
+	return resthuma.SuccessResponse(http.StatusCreated, created).
+		Header("Location", fmt.Sprintf("/items/%d", created.ID)), nil
 }
 
-func GetItemHandler(w http.ResponseWriter, r *http.Request) {
-	svc := serviceFromContext(r.Context())
+// GetItem retrieves an item by ID.
+func GetItem(ctx context.Context, in *dtoitem.IDPath) (*resthuma.Response[*response.GenericResponse[dtoitem.Item]], error) {
+	svc := serviceFromContext(ctx)
 	if svc == nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrInternalServerError))
-		return
+		return nil, resthuma.NewError(code.ErrInternalServerError)
 	}
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrBadRequest))
-		return
+	itm, errCode := svc.GetItem(ctx, in.ID)
+	if errCode != nil {
+		return nil, resthuma.NewError(errCode)
 	}
-	itm, codeErr := svc.GetItem(r.Context(), id)
-	if codeErr != nil {
-		sendResponse(w, utils.GenerateErrorResponse(*codeErr))
-		return
-	}
-	sendResponse(w, utils.GenerateSuccessResponse(itm))
+	return resthuma.SuccessResponse(http.StatusOK, itm), nil
 }
 
-func UpdateItemHandler(w http.ResponseWriter, r *http.Request) {
-	svc := serviceFromContext(r.Context())
+// UpdateItem updates an item by ID.
+func UpdateItem(ctx context.Context, in *dtoitem.UpdateItemInput) (*resthuma.Response[*response.GenericResponse[dtoitem.Item]], error) {
+	svc := serviceFromContext(ctx)
 	if svc == nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrInternalServerError))
-		return
+		return nil, resthuma.NewError(code.ErrInternalServerError)
 	}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrInternalServerError))
-		return
+	in.Body.ID = in.ID
+	updated, errCode := svc.UpdateItem(ctx, in.Body)
+	if errCode != nil {
+		return nil, resthuma.NewError(errCode)
 	}
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrBadRequest))
-		return
-	}
-	var req models.Item
-	if err := json.Unmarshal(body, &req); err != nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrPayloadError, err.Error()))
-		return
-	}
-	req.ID = id
-	updated, codeErr := svc.UpdateItem(r.Context(), req)
-	if codeErr != nil {
-		sendResponse(w, utils.GenerateErrorResponse(*codeErr))
-		return
-	}
-	sendResponse(w, utils.GenerateSuccessResponse(updated, nil))
+	return resthuma.SuccessResponse(http.StatusOK, updated), nil
 }
 
-func DeleteItemHandler(w http.ResponseWriter, r *http.Request) {
-	svc := serviceFromContext(r.Context())
+// DeleteItem deletes an item by ID.
+func DeleteItem(ctx context.Context, in *dtoitem.IDPath) (*resthuma.Response[struct{}], error) {
+	svc := serviceFromContext(ctx)
 	if svc == nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrInternalServerError))
-		return
+		return nil, resthuma.NewError(code.ErrInternalServerError)
 	}
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrBadRequest))
-		return
+	if errCode := svc.DeleteItem(ctx, in.ID); errCode != nil {
+		return nil, resthuma.NewError(errCode)
 	}
-	if codeErr := svc.DeleteItem(r.Context(), id); codeErr != nil {
-		sendResponse(w, utils.GenerateErrorResponse(*codeErr))
-		return
-	}
-	sendResponse(w, utils.GenerateSuccessResponse(nil))
+	return resthuma.NoContentResponse(), nil
 }

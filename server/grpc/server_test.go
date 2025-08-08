@@ -80,7 +80,7 @@ func (dummyItemRepoErr) List(context.Context) ([]models.Item, error) {
 	return nil, errors.New("bad list")
 }
 func (dummyItemRepoErr) Get(context.Context, int) (*models.Item, error) {
-	return nil, &code.ErrItemNotFound
+	return nil, code.ErrItemNotFound
 }
 func (dummyItemRepoErr) Update(context.Context, *models.Item) error { return errors.New("bad update") }
 func (dummyItemRepoErr) Delete(context.Context, int) error          { return errors.New("bad delete") }
@@ -137,19 +137,19 @@ func (stubService2) DeleteItem(_ context.Context, id int) *code.Code { return ni
 type stubServiceErr struct{}
 
 func (stubServiceErr) CreateItem(_ context.Context, item models.Item) (models.Item, *code.Code) {
-	return models.Item{}, &code.ErrInternalServerError
+	return models.Item{}, code.ErrInternalServerError
 }
 func (stubServiceErr) ListItems(_ context.Context) ([]models.Item, *code.Code) {
-	return nil, &code.ErrInternalServerError
+	return nil, code.ErrInternalServerError
 }
 func (stubServiceErr) GetItem(_ context.Context, id int) (models.Item, *code.Code) {
-	return models.Item{}, &code.ErrItemNotFound
+	return models.Item{}, code.ErrItemNotFound
 }
 func (stubServiceErr) UpdateItem(_ context.Context, item models.Item) (models.Item, *code.Code) {
-	return models.Item{}, &code.ErrInternalServerError
+	return models.Item{}, code.ErrInternalServerError
 }
 func (stubServiceErr) DeleteItem(_ context.Context, id int) *code.Code {
-	return &code.ErrInternalServerError
+	return code.ErrInternalServerError
 }
 
 func writeKeyFiles(t *testing.T, dir string) (string, string) {

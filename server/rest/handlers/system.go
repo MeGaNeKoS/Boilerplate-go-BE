@@ -1,38 +1,39 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
-	"strconv"
 
-	"project-template/infrastructure/utils"
-       svc "project-template/services/system"
+	"project-template/infrastructure/dto/response"
+	systemdto "project-template/infrastructure/dto/system"
+	"project-template/server/rest/handlers/resthuma"
+	"project-template/services/system"
 )
 
-var systemService = svc.NewService()
+var systemService = system.NewService()
 
-// EchoHandler responds with a simple echo message.
-func EchoHandler(w http.ResponseWriter, r *http.Request) {
-	resp, code := systemService.Echo(r.Context())
-	if code != nil {
-		sendResponse(w, utils.GenerateErrorResponse(*code))
-		return
+// Echo returns an echo response.
+func Echo(ctx context.Context, _ *resthuma.Empty) (*resthuma.Response[*response.GenericResponse[string]], error) {
+	resp, errCode := systemService.Echo(ctx)
+	if errCode != nil {
+		return nil, resthuma.NewError(errCode)
 	}
-	sendResponse(w, utils.GenerateSuccessResponse(resp))
+	str, _ := resp.(string)
+	return resthuma.SuccessResponse(http.StatusOK, str), nil
 }
 
-// CrashHandler intentionally panics to test recovery middleware.
-func CrashHandler(w http.ResponseWriter, r *http.Request) {
-	systemService.Crash(r.Context())
+// Crash triggers a panic to test recovery.
+func Crash(ctx context.Context, _ *resthuma.Empty) (*resthuma.Response[*response.GenericResponse[any]], error) {
+	systemService.Crash(ctx)
+	return resthuma.SuccessResponse[any](http.StatusOK, nil), nil
 }
 
-// LongHandler waits for the specified number of seconds before responding.
-func LongHandler(w http.ResponseWriter, r *http.Request) {
-	sleepStr := r.URL.Query().Get("sleep")
-	secs, _ := strconv.Atoi(sleepStr)
-	resp, code := systemService.Long(r.Context(), secs)
-	if code != nil {
-		sendResponse(w, utils.GenerateErrorResponse(*code))
-		return
+// Long waits for the specified time before responding.
+func Long(ctx context.Context, in *systemdto.LongInput) (*resthuma.Response[*response.GenericResponse[string]], error) {
+	resp, errCode := systemService.Long(ctx, in.Sleep)
+	if errCode != nil {
+		return nil, resthuma.NewError(errCode)
 	}
-	sendResponse(w, utils.GenerateSuccessResponse(resp))
+	pid, _ := resp.(string)
+	return resthuma.SuccessResponse(http.StatusOK, pid), nil
 }

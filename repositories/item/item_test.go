@@ -122,7 +122,7 @@ func TestItemRepositoryGetNotFound(t *testing.T) {
 	repo, mock := newRepo(t)
 	mock.ExpectQuery("SELECT").WillReturnError(sql.ErrNoRows)
 	_, err := repo.Get(context.Background(), 1)
-	if err == nil || err != &code.ErrItemNotFound {
+	if err == nil || err != code.ErrItemNotFound {
 		t.Fatalf("unexpected error %v", err)
 	}
 }

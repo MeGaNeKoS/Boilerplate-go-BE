@@ -17,6 +17,7 @@ import (
 	"project-template/infrastructure/config"
 	"project-template/infrastructure/db"
 	models "project-template/infrastructure/dto/item"
+	"project-template/infrastructure/dto/response"
 	"project-template/infrastructure/utils"
 	"project-template/outbound"
 	"project-template/outbound/service/example"
@@ -159,5 +160,20 @@ func TestAuthMiddlewareNoLogger(t *testing.T) {
 	mw.ServeHTTP(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("want 500 got %d", rec.Code)
+	}
+}
+
+func TestRespondNonJSON(t *testing.T) {
+	rec := httptest.NewRecorder()
+	resp := &response.HttpResponse{HTTPCode: http.StatusOK, ContentType: "text/plain", RawResponsePayload: []byte("hi")}
+	respond(rec, resp)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/plain" {
+		t.Fatalf("content type %q", ct)
+	}
+	if rec.Body.String() != "hi" {
+		t.Fatalf("body %q", rec.Body.String())
 	}
 }

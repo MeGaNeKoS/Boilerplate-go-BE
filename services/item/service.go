@@ -41,7 +41,7 @@ func NewService(itemRepo repoitem.Repository, external example.ExampleOutbound, 
 // CreateItem stores a new item using the repository layer.
 func (s *Service) CreateItem(ctx context.Context, item models.Item) (models.Item, *code.Code) {
 	if err := s.ItemRepo.Create(ctx, &item); err != nil {
-		return models.Item{}, &code.ErrInternalServerError
+		return models.Item{}, code.ErrInternalServerError
 	}
 	return item, nil
 }
@@ -50,7 +50,7 @@ func (s *Service) CreateItem(ctx context.Context, item models.Item) (models.Item
 func (s *Service) ListItems(ctx context.Context) ([]models.Item, *code.Code) {
 	list, err := s.ItemRepo.List(ctx)
 	if err != nil {
-		return nil, &code.ErrInternalServerError
+		return nil, code.ErrInternalServerError
 	}
 	return list, nil
 }
@@ -63,7 +63,7 @@ func (s *Service) GetItem(ctx context.Context, id int) (models.Item, *code.Code)
 		if errors.As(err, &c) {
 			return models.Item{}, c
 		}
-		return models.Item{}, &code.ErrInternalServerError
+		return models.Item{}, code.ErrInternalServerError
 	}
 	return *item, nil
 }
@@ -85,7 +85,7 @@ func (s *Service) UpdateItem(ctx context.Context, item models.Item) (models.Item
 		if errors.As(err, &c) {
 			return models.Item{}, c
 		}
-		return models.Item{}, &code.ErrInternalServerError
+		return models.Item{}, code.ErrInternalServerError
 	}
 	return item, nil
 }
@@ -97,7 +97,7 @@ func (s *Service) DeleteItem(ctx context.Context, id int) *code.Code {
 		if errors.As(err, &c) {
 			return c
 		}
-		return &code.ErrInternalServerError
+		return code.ErrInternalServerError
 	}
 	return nil
 }

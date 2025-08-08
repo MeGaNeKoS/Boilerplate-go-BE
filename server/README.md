@@ -15,8 +15,10 @@ This folder holds the HTTP API implemented with `chi`. Routers under
 into service calls. These handlers are the controllers for the REST API.
 Middleware provides request logging, panic recovery and context setup for
 repositories and outbound clients.
-The generated OpenAPI documentation is served under `/docs` when the
-server starts. See the [API Documentation](../README.md#api-documentation)
+The generated OpenAPI documentation is served under `/docs/public` for the
+public endpoints and `/docs/internal` for the full internal API when the
+server starts. These paths and the OpenAPI version can be configured via the
+`OpenAPI` section in `config.yaml`. See the [API Documentation](../README.md#api-documentation)
 section in the root README for details.
 
 ## gRPC (`server/grpc`)

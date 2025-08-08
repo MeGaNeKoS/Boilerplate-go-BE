@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"project-template/infrastructure/config"
@@ -115,12 +116,18 @@ func TestSendHTTPRequestErrors(t *testing.T) {
 	if code == nil || code.InternalCode != codepkg.ErrCreateRequestUrl.InternalCode {
 		t.Fatalf("expected url error")
 	}
+	if strings.Contains(code.Message, "http://") {
+		t.Fatalf("error message leaked URL: %s", code.Message)
+	}
 
 	// marshal body error
 	o = &HTTPOutbound{Host: "http://x", Path: "/", Method: http.MethodGet, Body: make(chan int), Response: &struct{}{}}
 	_, code = o.SendHTTPRequest(stubHTTPLogger{})
 	if code == nil || code.InternalCode != codepkg.ErrCreateRequestPayload.InternalCode {
 		t.Fatalf("expected payload error")
+	}
+	if strings.Contains(code.Message, "http://") {
+		t.Fatalf("error message leaked URL: %s", code.Message)
 	}
 
 	// build request error
@@ -129,12 +136,18 @@ func TestSendHTTPRequestErrors(t *testing.T) {
 	if code == nil || code.InternalCode != codepkg.ErrCreateRequestHeaders.InternalCode {
 		t.Fatalf("expected request error")
 	}
+	if strings.Contains(code.Message, "http://") {
+		t.Fatalf("error message leaked URL: %s", code.Message)
+	}
 
 	// send error
 	o = &HTTPOutbound{Host: "http://127.0.0.1:1", Path: "/", Method: http.MethodGet, Response: &struct{}{}}
 	_, code = o.SendHTTPRequest(stubHTTPLogger{})
 	if code == nil || code.InternalCode != codepkg.ErrFireExternalRequestFailed.InternalCode {
 		t.Fatalf("expected send error")
+	}
+	if strings.Contains(code.Message, "http://") {
+		t.Fatalf("error message leaked URL: %s", code.Message)
 	}
 }
 

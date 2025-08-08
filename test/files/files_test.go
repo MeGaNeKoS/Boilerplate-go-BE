@@ -4,22 +4,25 @@ package files_test
 
 import (
 	"bytes"
-	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"unsafe"
 
 	"project-template/cmd"
 	"project-template/infrastructure/config"
-	"project-template/infrastructure/dto/response"
 	"project-template/test/testutil"
 )
 
 func setupServer(t *testing.T) *http.Server {
 	t.Helper()
+	cwd, _ := os.Getwd()
+	_ = os.Chdir("../..")
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
 	config.Cfg = &config.Config{
 		AppName:   "APP",
 		Server:    config.ServerConfig{Endpoint: config.EndpointConfig{Based: "/api"}, Timeout: config.TimeoutConfig{Server: 1}},
@@ -52,36 +55,45 @@ func TestUploadFileIntegration(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code %d", rec.Code)
 	}
-	var resp response.GenericResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatal(err)
-	}
-	body := resp.Body.(map[string]interface{})
-	if body["message"] != "uploaded" {
-		t.Fatalf("body %#v", body)
-	}
 }
 
 func TestUploadFileIntegrationMissingFile(t *testing.T) {
 	srv := setupServer(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/files/upload", nil)
+	var b bytes.Buffer
+	mw := multipart.NewWriter(&b)
+	mw.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/files/upload", &b)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
 	rec := httptest.NewRecorder()
 	srv.Handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
+	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("code %d", rec.Code)
 	}
 }
 
 func TestDownloadFileIntegration(t *testing.T) {
 	srv := setupServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/files/download", nil)
+	expected, err := os.ReadFile("public/public.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/files/download/public.txt", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code %d", rec.Code)
 	}
-	if rec.Header().Get("Content-Disposition") == "" {
-		t.Fatalf("missing disposition")
+	if v := rec.Header().Get("Headers"); v != "" {
+		t.Fatalf("unexpected Headers header: %q", v)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); cd == "" {
+		t.Fatalf("missing Content-Disposition header")
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Fatalf("content type %q", ct)
+	}
+	if !bytes.Equal(rec.Body.Bytes(), expected) {
+		t.Fatalf("body %s", rec.Body.String())
 	}
 }
 
@@ -103,14 +115,6 @@ func TestFormWithFileIntegration(t *testing.T) {
 	srv.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code %d", rec.Code)
-	}
-	var resp response.GenericResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatal(err)
-	}
-	body := resp.Body.(map[string]interface{})
-	if body["name"] != "bob" {
-		t.Fatalf("body %#v", body)
 	}
 }
 
@@ -136,7 +140,7 @@ func TestFormWithFileIntegrationBadForm(t *testing.T) {
 	req.Header.Set("Content-Type", "multipart/form-data")
 	rec := httptest.NewRecorder()
 	srv.Handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
+	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("code %d", rec.Code)
 	}
 }

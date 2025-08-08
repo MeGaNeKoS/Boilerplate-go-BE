@@ -21,7 +21,7 @@ func TestListItemsIntegrationDBError(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnError(sql.ErrConnDone)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/items/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	rec := httptest.NewRecorder()
 
@@ -38,8 +38,9 @@ func TestListItemsIntegrationDBError(t *testing.T) {
 func TestCreateItemIntegrationBadJSON(t *testing.T) {
 	httpSrv, _, tok := setupServer(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/items/", bytes.NewBufferString("{"))
+	req := httptest.NewRequest(http.MethodPost, "/api/items", bytes.NewBufferString("{"))
 	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)
@@ -56,8 +57,9 @@ func TestCreateItemIntegrationDBError(t *testing.T) {
 	mock.ExpectExec("INSERT").WillReturnError(sql.ErrConnDone)
 	mock.ExpectRollback()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/items/", bytes.NewBufferString(`{"name":"foo"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/items", bytes.NewBufferString(`{"id":0,"name":"foo"}`))
 	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)
@@ -96,8 +98,9 @@ func TestUpdateItemIntegrationRepoError(t *testing.T) {
 	mock.ExpectExec("UPDATE").WillReturnError(sql.ErrConnDone)
 	mock.ExpectRollback()
 
-	req := httptest.NewRequest(http.MethodPut, "/api/items/4", bytes.NewBufferString(`{"name":"baz"}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/items/4", bytes.NewBufferString(`{"id":4,"name":"baz"}`))
 	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)
@@ -134,7 +137,7 @@ func TestDeleteItemIntegrationRepoError(t *testing.T) {
 func TestListItemsIntegrationUnauthorized(t *testing.T) {
 	httpSrv, _, _ := setupServer(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/items/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)
@@ -147,7 +150,8 @@ func TestListItemsIntegrationUnauthorized(t *testing.T) {
 func TestCreateItemIntegrationUnauthorized(t *testing.T) {
 	httpSrv, _, _ := setupServer(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/items/", bytes.NewBufferString(`{"name":"x"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/items", bytes.NewBufferString(`{"id":0,"name":"x"}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)
@@ -173,7 +177,8 @@ func TestGetItemIntegrationUnauthorized(t *testing.T) {
 func TestUpdateItemIntegrationUnauthorized(t *testing.T) {
 	httpSrv, _, _ := setupServer(t)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/items/1", bytes.NewBufferString(`{"name":"x"}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/items/1", bytes.NewBufferString(`{"id":1,"name":"x"}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)
@@ -199,8 +204,9 @@ func TestDeleteItemIntegrationUnauthorized(t *testing.T) {
 func TestCreateItemIntegrationBadBody(t *testing.T) {
 	httpSrv, _, tok := setupServer(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/items/", errReader{})
+	req := httptest.NewRequest(http.MethodPost, "/api/items", errReader{})
 	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)
@@ -215,6 +221,7 @@ func TestUpdateItemIntegrationBadBody(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPut, "/api/items/1", errReader{})
 	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)
@@ -229,6 +236,7 @@ func TestUpdateItemIntegrationBadJSON(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPut, "/api/items/1", bytes.NewBufferString("{"))
 	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)
@@ -260,7 +268,7 @@ func TestGetItemIntegrationDBError(t *testing.T) {
 func TestListItemsIntegrationInvalidToken(t *testing.T) {
 	httpSrv, _, _ := setupServer(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/items/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
 	req.Header.Set("Authorization", "Bearer bad")
 	rec := httptest.NewRecorder()
 
@@ -274,8 +282,9 @@ func TestListItemsIntegrationInvalidToken(t *testing.T) {
 func TestCreateItemIntegrationInvalidToken(t *testing.T) {
 	httpSrv, _, _ := setupServer(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/items/", bytes.NewBufferString(`{"name":"x"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/items", bytes.NewBufferString(`{"id":0,"name":"x"}`))
 	req.Header.Set("Authorization", "Bearer bad")
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)
@@ -302,8 +311,9 @@ func TestGetItemIntegrationInvalidToken(t *testing.T) {
 func TestUpdateItemIntegrationInvalidToken(t *testing.T) {
 	httpSrv, _, _ := setupServer(t)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/items/1", bytes.NewBufferString(`{"name":"x"}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/items/1", bytes.NewBufferString(`{"id":1,"name":"x"}`))
 	req.Header.Set("Authorization", "Bearer bad")
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)
@@ -337,7 +347,7 @@ func TestGetItemIntegrationBadID(t *testing.T) {
 
 	httpSrv.Handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
+	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("code %d", rec.Code)
 	}
 }
@@ -346,13 +356,14 @@ func TestGetItemIntegrationBadID(t *testing.T) {
 func TestUpdateItemIntegrationBadID(t *testing.T) {
 	httpSrv, _, tok := setupServer(t)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/items/bad", bytes.NewBufferString(`{"name":"x"}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/items/bad", bytes.NewBufferString(`{"id":1,"name":"x"}`))
 	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
+	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("code %d", rec.Code)
 	}
 }
@@ -367,7 +378,7 @@ func TestDeleteItemIntegrationBadID(t *testing.T) {
 
 	httpSrv.Handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
+	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("code %d", rec.Code)
 	}
 }
@@ -380,8 +391,9 @@ func TestUpdateItemIntegrationNotFound(t *testing.T) {
 	})
 	defer patchRepo.Unpatch()
 
-	req := httptest.NewRequest(http.MethodPut, "/api/items/4", bytes.NewBufferString(`{"name":"baz"}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/items/4", bytes.NewBufferString(`{"id":4,"name":"baz"}`))
 	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)

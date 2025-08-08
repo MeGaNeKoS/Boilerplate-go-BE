@@ -39,8 +39,8 @@ type notFoundItemRepo struct{}
 func (notFoundItemRepo) Create(context.Context, *models.Item) error     { return nil }
 func (notFoundItemRepo) List(context.Context) ([]models.Item, error)    { return nil, nil }
 func (notFoundItemRepo) Get(context.Context, int) (*models.Item, error) { return nil, nil }
-func (notFoundItemRepo) Update(context.Context, *models.Item) error     { return &codepkg.ErrItemNotFound }
-func (notFoundItemRepo) Delete(context.Context, int) error              { return &codepkg.ErrItemNotFound }
+func (notFoundItemRepo) Update(context.Context, *models.Item) error     { return codepkg.ErrItemNotFound }
+func (notFoundItemRepo) Delete(context.Context, int) error              { return codepkg.ErrItemNotFound }
 
 func setupServer(t *testing.T) (*http.Server, sqlmock.Sqlmock, string) {
 	t.Helper()
@@ -74,7 +74,9 @@ func setupServer(t *testing.T) (*http.Server, sqlmock.Sqlmock, string) {
 	t.Cleanup(patchLogger.Unpatch)
 
 	patchHTTP := monkey.PatchInstanceMethod(reflect.TypeOf(&transport.HTTPOutbound{}), "SendHTTPRequest", func(_ *transport.HTTPOutbound, _ logger.Logger) (response.HttpResponse, *codepkg.Code) {
-		return response.HttpResponse{HTTPCode: http.StatusOK, RawResponsePayload: &response.GenericResponse{Body: models.Item{ID: 5, Name: "x"}}}, nil
+		gr := &response.GenericResponse[any]{}
+		gr.Body = models.Item{ID: 5, Name: "x"}
+		return response.HttpResponse{HTTPCode: http.StatusOK, RawResponsePayload: gr}, nil
 	})
 	t.Cleanup(patchHTTP.Unpatch)
 
@@ -90,7 +92,7 @@ func TestListItemsIntegration(t *testing.T) {
 	rows := sqlmock.NewRows([]string{"id", "name"}).AddRow(1, "foo")
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/items/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	rec := httptest.NewRecorder()
 
@@ -100,16 +102,11 @@ func TestListItemsIntegration(t *testing.T) {
 		t.Fatalf("code %d", rec.Code)
 	}
 
-	var resp response.GenericResponse
+	var resp response.GenericResponse[[]models.Item]
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	bodyBytes, _ := json.Marshal(resp.Body)
-	var items []models.Item
-	if err := json.Unmarshal(bodyBytes, &items); err != nil {
-		t.Fatal(err)
-	}
-
+	items := resp.Body
 	if len(items) != 1 || items[0].ID != 1 {
 		t.Fatalf("unexpected items %#v", items)
 	}
@@ -125,25 +122,22 @@ func TestCreateItemIntegration(t *testing.T) {
 	mock.ExpectExec("INSERT").WillReturnResult(sqlmock.NewResult(3, 1))
 	mock.ExpectCommit()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/items/", bytes.NewBufferString(`{"name":"foo"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/items", bytes.NewBufferString(`{"id":0,"name":"foo"}`))
 	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
+	if rec.Code != http.StatusCreated {
 		t.Fatalf("code %d", rec.Code)
 	}
 
-	var resp response.GenericResponse
+	var resp response.GenericResponse[models.Item]
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	bodyBytes, _ := json.Marshal(resp.Body)
-	var item models.Item
-	if err := json.Unmarshal(bodyBytes, &item); err != nil {
-		t.Fatal(err)
-	}
+	item := resp.Body
 	if item.ID != 3 || item.Name != "foo" {
 		t.Fatalf("unexpected item %#v", item)
 	}
@@ -168,15 +162,11 @@ func TestGetItemIntegration(t *testing.T) {
 		t.Fatalf("code %d", rec.Code)
 	}
 
-	var resp response.GenericResponse
+	var resp response.GenericResponse[models.Item]
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	bodyBytes, _ := json.Marshal(resp.Body)
-	var item models.Item
-	if err := json.Unmarshal(bodyBytes, &item); err != nil {
-		t.Fatal(err)
-	}
+	item := resp.Body
 	if item.ID != 2 || item.Name != "bar" {
 		t.Fatalf("unexpected item %#v", item)
 	}
@@ -192,8 +182,9 @@ func TestUpdateItemIntegration(t *testing.T) {
 	mock.ExpectExec("UPDATE").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	req := httptest.NewRequest(http.MethodPut, "/api/items/4", bytes.NewBufferString(`{"name":"baz"}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/items/4", bytes.NewBufferString(`{"id":4,"name":"baz"}`))
 	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	httpSrv.Handler.ServeHTTP(rec, req)
@@ -202,15 +193,11 @@ func TestUpdateItemIntegration(t *testing.T) {
 		t.Fatalf("code %d", rec.Code)
 	}
 
-	var resp response.GenericResponse
+	var resp response.GenericResponse[models.Item]
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	bodyBytes, _ := json.Marshal(resp.Body)
-	var item models.Item
-	if err := json.Unmarshal(bodyBytes, &item); err != nil {
-		t.Fatal(err)
-	}
+	item := resp.Body
 	if item.ID != 4 || item.Name != "baz" {
 		t.Fatalf("unexpected item %#v", item)
 	}
@@ -232,7 +219,7 @@ func TestDeleteItemIntegration(t *testing.T) {
 
 	httpSrv.Handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
+	if rec.Code != http.StatusNoContent {
 		t.Fatalf("code %d", rec.Code)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

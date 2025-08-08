@@ -1,47 +1,56 @@
 package handlers
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 
-	"project-template/infrastructure/utils"
+	"project-template/infrastructure/dto/files"
+	"project-template/infrastructure/dto/response"
 	"project-template/pkg/code"
+	"project-template/server/rest/handlers/resthuma"
 )
 
-// UploadFileHandler accepts a file upload and returns a success message.
-func UploadFileHandler(w http.ResponseWriter, r *http.Request) {
-	file, _, err := r.FormFile("file")
-	if err != nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrPayloadError, err.Error()))
-		return
+// UploadFile accepts a file and returns a success message.
+func UploadFile(ctx context.Context, in *files.UploadInput) (*resthuma.Response[*response.GenericResponse[files.UploadOutput]], error) {
+	data := in.RawBody.Data()
+	if data == nil || !data.File.IsSet {
+		return nil, resthuma.NewError(code.ErrPayloadError)
 	}
-	defer file.Close()
-	_, _ = io.Copy(io.Discard, file)
-	sendResponse(w, utils.GenerateSuccessResponse(struct {
-		Message string `json:"message"`
-	}{Message: "uploaded"}))
+	_, _ = io.Copy(io.Discard, data.File)
+	return resthuma.SuccessResponse(http.StatusOK, files.UploadOutput{Message: "uploaded"}), nil
 }
 
-// DownloadFileHandler returns a small text file for download.
-func DownloadFileHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", "attachment; filename=sample.txt")
-	_, _ = w.Write([]byte("sample file"))
+// DownloadFile streams a file from the "public" directory by name.
+func DownloadFile(ctx context.Context, in *files.DownloadInput) (*resthuma.Response[[]byte], error) {
+	path := filepath.Join("public", in.Name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, resthuma.NewError(code.ErrNotFound)
+		}
+		return nil, resthuma.NewError(code.ErrInternalServerError)
+	}
+	mt := mime.TypeByExtension(filepath.Ext(in.Name))
+	if mt == "" {
+		mt = http.DetectContentType(data)
+	}
+	return resthuma.NewResponse(http.StatusOK, data).
+		Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", in.Name)).
+		Header("Content-Type", mt), nil
 }
 
-// FormWithFileHandler accepts a form field and an attached file.
-func FormWithFileHandler(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrPayloadError, err.Error()))
-		return
+// FormWithFile handles a multipart form with a file.
+func FormWithFile(ctx context.Context, in *files.FormInput) (*resthuma.Response[*response.GenericResponse[files.FormOutput]], error) {
+	data := in.RawBody.Data()
+	if data == nil || !data.Attachment.IsSet {
+		return nil, resthuma.NewError(code.ErrPayloadError)
 	}
-	_, _, err := r.FormFile("attachment")
-	if err != nil {
-		sendResponse(w, utils.GenerateErrorResponse(code.ErrPayloadError, err.Error()))
-		return
-	}
-	name := r.FormValue("name")
-	sendResponse(w, utils.GenerateSuccessResponse(struct {
-		Name string `json:"name"`
-	}{Name: name}))
+	_, _ = io.Copy(io.Discard, data.Attachment)
+	return resthuma.SuccessResponse(http.StatusOK, files.FormOutput{Name: data.Name}), nil
 }

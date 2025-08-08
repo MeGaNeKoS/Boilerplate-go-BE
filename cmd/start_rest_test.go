@@ -5,6 +5,7 @@ package cmd
 import (
 	"errors"
 	"flag"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,17 +17,18 @@ import (
 	"testing"
 	"time"
 
-	"project-template/docs"
 	"project-template/infrastructure/config"
 	"project-template/infrastructure/db"
 	"project-template/infrastructure/utils"
 	"project-template/pkg/logger"
-	"project-template/server/rest/middleware"
-	"project-template/server/rest/routes"
+	"project-template/server/rest/helpers"
 
 	"github.com/bouk/monkey"
 	"github.com/coreos/go-systemd/v22/activation"
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+	"gopkg.in/yaml.v3"
 )
 
 var serverClosedErr = http.ErrServerClosed
@@ -326,77 +328,190 @@ func TestGetRESTServerWalkError(t *testing.T) {
 	}
 }
 
-func TestGetRESTServerEmptyPrefix(t *testing.T) {
-	resetREST()
-	oldGroups := routes.RouteGroups
-	called := false
-	routes.RouteGroups = []routes.RouteGroup{{
-		Prefix: "",
-		Routes: &[]routes.RouteDef{{
-			Method:  http.MethodGet,
-			Pattern: "/x",
-			Handler: func(http.ResponseWriter, *http.Request) { called = true },
-		}},
-	}}
-	defer func() { routes.RouteGroups = oldGroups }()
-
-	savedSpec := docs.Spec
-	defer func() { docs.Spec = savedSpec }()
-	chiWalk = func(chi.Routes, chi.WalkFunc) error { return nil }
-	defer func() { chiWalk = chi.Walk }()
-	cfg := &config.Config{REST: config.ListenerConfig{Host: "127.0.0.1", Port: "0"}, Server: config.ServerConfig{Timeout: config.TimeoutConfig{Read: 1, Write: 1, Idle: 1}}}
-	srv := GetRESTServer(cfg, stubLog{})
-	if srv == nil {
-		t.Fatalf("server nil")
+func TestFilterInternal(t *testing.T) {
+	type input struct {
+		Secret string `header:"X-Secret" internal:"true"`
+		Q      string `query:"q"`
 	}
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
-	srv.httpServer.Handler.ServeHTTP(rr, req)
-	if !called {
-		t.Fatalf("handler not called")
+	helpers.ClearInternalParams()
+	helpers.TrackInternalParams("pubOp", input{})
+	spec := &huma.OpenAPI{
+		Paths: map[string]*huma.PathItem{
+			"/a": {Get: &huma.Operation{Tags: []string{helpers.InternalTag()}}},
+			"/b": {
+				Get: &huma.Operation{OperationID: "pubOp", Tags: []string{"pub"}, Parameters: []*huma.Param{
+					{Name: "X-Secret", In: "header"},
+					{Name: "q", In: "query"},
+				}},
+				Post: &huma.Operation{Tags: []string{helpers.InternalTag()}},
+			},
+		},
+		Tags: []*huma.Tag{{Name: "pub"}, {Name: helpers.InternalTag()}},
+	}
+	filtered := filterInternal(spec)
+	if _, ok := filtered.Paths["/a"]; ok {
+		t.Fatalf("internal path kept")
+	}
+	b := filtered.Paths["/b"]
+	if b == nil || b.Post != nil || b.Get == nil {
+		t.Fatalf("unexpected filtered path: %#v", b)
+	}
+	if len(b.Get.Parameters) != 1 || b.Get.Parameters[0].Name != "q" {
+		t.Fatalf("internal parameter not removed: %#v", b.Get.Parameters)
+	}
+	for _, tag := range filtered.Tags {
+		if tag.Name == helpers.InternalTag() {
+			t.Fatalf("internal tag not removed")
+		}
+	}
+	orig := spec.Paths["/b"].Get.Parameters
+	if len(orig) != 2 {
+		t.Fatalf("original spec mutated: %#v", orig)
+	}
+	internal := stripInternalTag(spec)
+	if params := internal.Paths["/b"].Get.Parameters; len(params) != 2 {
+		t.Fatalf("internal parameter missing: %#v", params)
 	}
 }
 
-func TestGetRESTServerAuthGroup(t *testing.T) {
+func TestStripInternalTag(t *testing.T) {
+	spec := &huma.OpenAPI{
+		Paths: map[string]*huma.PathItem{
+			"/a": {Get: &huma.Operation{Tags: []string{"pub", helpers.InternalTag()}}},
+			"/b": {},
+		},
+		Tags: []*huma.Tag{{Name: helpers.InternalTag()}, {Name: "pub"}},
+	}
+	stripped := stripInternalTag(spec)
+	got := stripped.Paths["/a"].Get.Tags
+	if len(got) != 1 || got[0] != "pub" {
+		t.Fatalf("tag not stripped: %v", got)
+	}
+	for _, tag := range stripped.Tags {
+		if tag.Name == helpers.InternalTag() {
+			t.Fatalf("internal tag not removed")
+		}
+	}
+}
+
+func TestRegisterDocs(t *testing.T) {
+	router := chi.NewRouter()
+	api := humachi.New(router, huma.DefaultConfig("t", "v"))
+	spec := &huma.OpenAPI{OpenAPI: "3.0.3"}
+	registerDocs(api, spec, "/openapi-test", "/docs/test", "Title")
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/openapi-test.yaml")
+	if err != nil {
+		t.Fatalf("get spec: %v", err)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/vnd.oai.openapi+yaml" {
+		t.Fatalf("unexpected ct %s", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "openapi: 3.0.3") {
+		t.Fatalf("bad spec body %s", body)
+	}
+
+	resp, err = http.Get(srv.URL + "/docs/test")
+	if err != nil {
+		t.Fatalf("get docs: %v", err)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/html" {
+		t.Fatalf("unexpected ct %s", ct)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "<title>Title</title>") {
+		t.Fatalf("bad html body %s", body)
+	}
+}
+
+func TestGetRESTServerVersionOverride(t *testing.T) {
 	resetREST()
-	oldGroups := routes.RouteGroups
-	called := false
-	routes.RouteGroups = []routes.RouteGroup{{
-		Prefix:  "",
-		UseAuth: true,
-		Routes: &[]routes.RouteDef{{
-			Method:  http.MethodGet,
-			Pattern: "/x",
-			Handler: func(http.ResponseWriter, *http.Request) { called = true },
-		}},
-	}}
-	defer func() { routes.RouteGroups = oldGroups }()
-
-	savedSpec := docs.Spec
-	defer func() { docs.Spec = savedSpec }()
-	chiWalk = func(chi.Routes, chi.WalkFunc) error { return nil }
-	defer func() { chiWalk = chi.Walk }()
-	authCalled := false
-	patchAuth := monkey.Patch(middleware.AuthMiddleware, func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			authCalled = true
-			next.ServeHTTP(w, r)
-		})
-	})
-	defer patchAuth.Unpatch()
-
-	cfg := &config.Config{REST: config.ListenerConfig{Host: "127.0.0.1", Port: "0"}, Server: config.ServerConfig{Timeout: config.TimeoutConfig{Read: 1, Write: 1, Idle: 1}}}
+	cfg := &config.Config{
+		Version:   "1.2",
+		REST:      config.ListenerConfig{Host: "127.0.0.1", Port: "0"},
+		Server:    config.ServerConfig{Timeout: config.TimeoutConfig{Read: 1, Write: 1, Idle: 1}, Endpoint: config.EndpointConfig{Based: "/api"}},
+		LogTarget: config.LogConfig{Path: t.TempDir(), FileName: "app.log"},
+		OpenAPI:   config.OpenAPIConfig{Version: "3.1.0"},
+	}
 	srv := GetRESTServer(cfg, stubLog{})
 	if srv == nil {
-		t.Fatalf("server nil")
+		t.Fatalf("nil server")
 	}
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/x", nil)
-	srv.httpServer.Handler.ServeHTTP(rr, req)
-	if !authCalled {
-		t.Fatalf("auth middleware not called")
+	ts := httptest.NewServer(srv.httpServer.Handler)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/openapi-public.yaml")
+	if err != nil {
+		t.Fatalf("get spec: %v", err)
 	}
-	if !called {
-		t.Fatalf("handler not called")
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	var spec map[string]any
+	if err := yaml.Unmarshal(body, &spec); err != nil {
+		t.Fatalf("parse spec: %v", err)
+	}
+	info, _ := spec["info"].(map[string]any)
+	if v, _ := info["version"].(string); v != "1.2" {
+		t.Fatalf("info version missing: %v", v)
+	}
+}
+
+func TestGetRESTServerDocDefault(t *testing.T) {
+	resetREST()
+	routes := map[string]bool{}
+	patchWalk := monkey.Patch(chiWalk, func(r chi.Routes, fn chi.WalkFunc) error {
+		return chi.Walk(r, func(method, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
+			routes[route] = true
+			return nil
+		})
+	})
+	defer patchWalk.Unpatch()
+
+	cfg := &config.Config{
+		REST:      config.ListenerConfig{Host: "127.0.0.1", Port: "0"},
+		Server:    config.ServerConfig{Timeout: config.TimeoutConfig{Read: 1, Write: 1, Idle: 1}, Endpoint: config.EndpointConfig{Based: "/api"}},
+		LogTarget: config.LogConfig{Path: t.TempDir(), FileName: "app.log"},
+	}
+	srv := GetRESTServer(cfg, stubLog{})
+	if srv == nil {
+		t.Fatalf("nil server")
+	}
+	if !routes["/docs/public"] || !routes["/docs/internal"] {
+		t.Fatalf("doc routes missing: %v", routes)
+	}
+}
+
+func TestGetRESTServerDocConfig(t *testing.T) {
+	resetREST()
+	routes := map[string]bool{}
+	patchWalk := monkey.Patch(chiWalk, func(r chi.Routes, fn chi.WalkFunc) error {
+		return chi.Walk(r, func(method, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
+			routes[route] = true
+			return nil
+		})
+	})
+	defer patchWalk.Unpatch()
+
+	cfg := &config.Config{
+		Version:   "1.2",
+		REST:      config.ListenerConfig{Host: "127.0.0.1", Port: "0"},
+		Server:    config.ServerConfig{Timeout: config.TimeoutConfig{Read: 1, Write: 1, Idle: 1}, Endpoint: config.EndpointConfig{Based: "/api"}},
+		LogTarget: config.LogConfig{Path: t.TempDir(), FileName: "app.log"},
+		OpenAPI: config.OpenAPIConfig{
+			Version: "3.1.0",
+			Docs:    config.DocsConfig{Public: "/pub", Internal: "/int"},
+		},
+	}
+	srv := GetRESTServer(cfg, stubLog{})
+	if srv == nil {
+		t.Fatalf("nil server")
+	}
+	if !routes["/pub"] || !routes["/int"] {
+		t.Fatalf("doc routes missing: %v", routes)
 	}
 }

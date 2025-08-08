@@ -2,118 +2,176 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
+	"unsafe"
+
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/humatest"
 
 	"project-template/infrastructure/config"
+	"project-template/infrastructure/dto/files"
 	"project-template/infrastructure/dto/response"
 )
 
-func TestUploadFileHandler(t *testing.T) {
+// stubFile implements multipart.File in memory.
+type stubFile struct{ *bytes.Reader }
+
+func (stubFile) Close() error { return nil }
+
+func setUploadData(m *huma.MultipartFormFiles[files.UploadForm], data *files.UploadForm) {
+	v := reflect.ValueOf(m).Elem().FieldByName("data")
+	reflect.NewAt(v.Type(), unsafe.Pointer(v.UnsafeAddr())).Elem().Set(reflect.ValueOf(data))
+}
+
+func setFormData(m *huma.MultipartFormFiles[files.FormBody], data *files.FormBody) {
+	v := reflect.ValueOf(m).Elem().FieldByName("data")
+	reflect.NewAt(v.Type(), unsafe.Pointer(v.UnsafeAddr())).Elem().Set(reflect.ValueOf(data))
+}
+
+func TestUploadFile(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	var b bytes.Buffer
-	mw := multipart.NewWriter(&b)
-	fw, err := mw.CreateFormFile("file", "a.txt")
+	in := &files.UploadInput{}
+	setUploadData(&in.RawBody, &files.UploadForm{File: huma.FormFile{File: &stubFile{bytes.NewReader([]byte("data"))}, IsSet: true}})
+	resp, err := UploadFile(context.Background(), in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = fw.Write([]byte("data"))
-	mw.Close()
-
-	req := httptest.NewRequest(http.MethodPost, "/", &b)
-	req.Header.Set("Content-Type", mw.FormDataContentType())
 	rec := httptest.NewRecorder()
-	UploadFileHandler(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("code %d", rec.Code)
-	}
-	var resp response.GenericResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+	ctx := humatest.NewContext(nil, httptest.NewRequest(http.MethodPost, "/", nil), rec)
+	resp.Body(ctx)
+	var out response.GenericResponse[files.UploadOutput]
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	body := resp.Body.(map[string]interface{})
-	if body["message"] != "uploaded" {
-		t.Fatalf("body %#v", body)
+	if out.Body.Message != "uploaded" {
+		t.Fatalf("body %#v", out.Body)
 	}
 }
 
-func TestUploadFileHandlerError(t *testing.T) {
+func TestUploadFileError(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
-	rec := httptest.NewRecorder()
-	UploadFileHandler(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("code %d", rec.Code)
+	_, err := UploadFile(context.Background(), &files.UploadInput{})
+	if err == nil {
+		t.Fatalf("expected error")
 	}
 }
 
-func TestDownloadFileHandler(t *testing.T) {
-	rec := httptest.NewRecorder()
-	DownloadFileHandler(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Header().Get("Content-Type") != "application/octet-stream" {
-		t.Fatalf("content type %s", rec.Header().Get("Content-Type"))
-	}
-	if !bytes.Contains(rec.Body.Bytes(), []byte("sample file")) {
-		t.Fatalf("body %s", rec.Body.String())
-	}
-}
-
-func TestFormWithFileHandler(t *testing.T) {
-	config.Cfg = &config.Config{AppName: "APP"}
-	var b bytes.Buffer
-	mw := multipart.NewWriter(&b)
-	_ = mw.WriteField("name", "bob")
-	fw, err := mw.CreateFormFile("attachment", "b.txt")
+func TestDownloadFile(t *testing.T) {
+	cwd, _ := os.Getwd()
+	_ = os.Chdir("../../..")
+	defer os.Chdir(cwd)
+	expected, err := os.ReadFile("public/public.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = fw.Write([]byte("data"))
-	mw.Close()
-
-	req := httptest.NewRequest(http.MethodPost, "/", &b)
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	rec := httptest.NewRecorder()
-	FormWithFileHandler(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("code %d", rec.Code)
-	}
-	var resp response.GenericResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+	resp, err := DownloadFile(context.Background(), &files.DownloadInput{Name: "public.txt"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	body := resp.Body.(map[string]interface{})
-	if body["name"] != "bob" {
-		t.Fatalf("body %#v", body)
+	rec := httptest.NewRecorder()
+	ctx := humatest.NewContext(nil, httptest.NewRequest(http.MethodGet, "/", nil), rec)
+	resp.Body(ctx)
+	if !bytes.Equal(rec.Body.Bytes(), expected) {
+		t.Fatalf("body %s", rec.Body.Bytes())
+	}
+	if resp.GetHeaders().Get("Content-Disposition") == "" {
+		t.Fatalf("missing disposition")
+	}
+	if resp.GetHeaders().Get("Content-Type") != "text/plain; charset=utf-8" {
+		t.Fatalf("content type %q", resp.GetHeaders().Get("Content-Type"))
 	}
 }
 
-func TestFormWithFileHandlerError(t *testing.T) {
+func TestDownloadFileNotFound(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
-	req.Header.Set("Content-Type", "multipart/form-data")
-	rec := httptest.NewRecorder()
-	FormWithFileHandler(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("code %d", rec.Code)
+	cwd, _ := os.Getwd()
+	_ = os.Chdir("../../..")
+	defer os.Chdir(cwd)
+	_, err := DownloadFile(context.Background(), &files.DownloadInput{Name: "missing.txt"})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if herr, ok := err.(huma.StatusError); !ok || herr.GetStatus() != http.StatusNotFound {
+		t.Fatalf("status %v", err)
 	}
 }
 
-func TestFormWithFileHandlerMissingFile(t *testing.T) {
+func TestDownloadFileInternalError(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	var b bytes.Buffer
-	mw := multipart.NewWriter(&b)
-	_ = mw.WriteField("name", "a")
-	mw.Close()
+	cwd, _ := os.Getwd()
+	_ = os.Chdir("../../..")
+	defer os.Chdir(cwd)
+	_, err := DownloadFile(context.Background(), &files.DownloadInput{Name: ""})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if herr, ok := err.(huma.StatusError); !ok || herr.GetStatus() != http.StatusInternalServerError {
+		t.Fatalf("status %v", err)
+	}
+}
 
-	req := httptest.NewRequest(http.MethodPost, "/", &b)
-	req.Header.Set("Content-Type", mw.FormDataContentType())
+func TestDownloadFileMimeFallback(t *testing.T) {
+	config.Cfg = &config.Config{AppName: "APP"}
+	cwd, _ := os.Getwd()
+	_ = os.Chdir("../../..")
+	defer os.Chdir(cwd)
+	path := filepath.Join("public", "nomime")
+	if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(path)
+	resp, err := DownloadFile(context.Background(), &files.DownloadInput{Name: "nomime"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ct := resp.GetHeaders().Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+		t.Fatalf("content type %q", ct)
+	}
+}
+
+func TestFormWithFile(t *testing.T) {
+	config.Cfg = &config.Config{AppName: "APP"}
+	in := &files.FormInput{}
+	setFormData(&in.RawBody, &files.FormBody{Name: "bob", Attachment: huma.FormFile{File: &stubFile{bytes.NewReader([]byte("data"))}, IsSet: true}})
+	resp, err := FormWithFile(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rec := httptest.NewRecorder()
-	FormWithFileHandler(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("code %d", rec.Code)
+	ctx := humatest.NewContext(nil, httptest.NewRequest(http.MethodPost, "/", nil), rec)
+	resp.Body(ctx)
+	var out response.GenericResponse[files.FormOutput]
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Body.Name != "bob" {
+		t.Fatalf("body %#v", out.Body)
+	}
+}
+
+func TestFormWithFileError(t *testing.T) {
+	config.Cfg = &config.Config{AppName: "APP"}
+	in := &files.FormInput{}
+	setFormData(&in.RawBody, &files.FormBody{Name: "x"})
+	_, err := FormWithFile(context.Background(), in)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+}
+
+func TestFormWithFileMissingFile(t *testing.T) {
+	config.Cfg = &config.Config{AppName: "APP"}
+	in := &files.FormInput{}
+	setFormData(&in.RawBody, &files.FormBody{Name: "a"})
+	_, err := FormWithFile(context.Background(), in)
+	if err == nil {
+		t.Fatalf("expected error")
 	}
 }

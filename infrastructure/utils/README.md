@@ -32,10 +32,10 @@ replacement logic and in tests.
 
 ## `http`
 
-Functions for creating standardised HTTP success and error responses based on
-`pkg/code` values and the configured application name.  The `GenerateErrorResponse`
-and `GenerateSuccessResponse` helpers ensure all endpoints return a consistent
-payload structure.
+Functions for creating standardised HTTP responses. `GenerateErrorResponse`
+builds RFC 7807 problem details based on `pkg/code` values and the configured
+application name. `GenerateResponse` wraps arbitrary payloads with a status
+code and content type so endpoints can return JSON or other formats as needed.
 
 ## `jwt`
 

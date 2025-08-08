@@ -24,3 +24,9 @@ func TestCodeError(t *testing.T) {
 		t.Fatalf("unexpected error %q", c.Error())
 	}
 }
+
+func TestRegistryAutoName(t *testing.T) {
+	if c, ok := Lookup("ErrPayloadError"); !ok || c.HTTPCode != http.StatusBadRequest {
+		t.Fatalf("code not registered: %v %v", c, ok)
+	}
+}

@@ -113,7 +113,7 @@ func (r *itemRepository) Get(ctx context.Context, id int) (*models.Item, error) 
 	if err := row.Scan(&item.ID, &item.Name); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			r.log.ErrorF("Item not found: %v", err)
-			return nil, &code.ErrItemNotFound
+			return nil, code.ErrItemNotFound
 		}
 		r.log.ErrorF("Failed to scan row: %v", err)
 		return nil, err

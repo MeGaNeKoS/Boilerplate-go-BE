@@ -44,33 +44,25 @@ func (o *HTTPOutbound) SendHTTPRequest(log logger.Logger) (response.HttpResponse
 	url, err := buildURL(*o)
 	if err != nil {
 		log.ErrorF("Failed to build URL: %v", err)
-		x := &code.ErrCreateRequestUrl
-		x.AppendMessage(fmt.Sprintf("URL: %v", url))
-		return emptyResponse(), x
+		return emptyResponse(), code.ErrCreateRequestUrl
 	}
 
 	body, err := marshalRequestBody(o.Body)
 	if err != nil {
 		log.ErrorF("Failed to marshal request body: %v", err)
-		x := &code.ErrCreateRequestPayload
-		x.AppendMessage(fmt.Sprintf("URL: %v", url))
-		return emptyResponse(), x
+		return emptyResponse(), code.ErrCreateRequestPayload
 	}
 
 	httpReq, err := buildHTTPRequest(*o, url, body)
 	if err != nil {
 		log.ErrorF("Failed to build HTTP request: %v", err)
-		x := &code.ErrCreateRequestHeaders
-		x.AppendMessage(fmt.Sprintf("URL: %v", url))
-		return emptyResponse(), x
+		return emptyResponse(), code.ErrCreateRequestHeaders
 	}
 
 	httpResp, err := sendHTTPRequest(httpReq)
 	if err != nil {
 		log.ErrorF("Request failed: %v", err)
-		x := &code.ErrFireExternalRequestFailed
-		x.AppendMessage(fmt.Sprintf("URL: %v", url))
-		return emptyResponse(), x
+		return emptyResponse(), code.ErrFireExternalRequestFailed
 	}
 	defer func(Body io.ReadCloser) {
 		if err := Body.Close(); err != nil {
@@ -82,9 +74,7 @@ func (o *HTTPOutbound) SendHTTPRequest(log logger.Logger) (response.HttpResponse
 	result, err := handleResponse(httpResp, respPlaceholder, log)
 	if err != nil {
 		log.ErrorF("Failed to handle response: %v", err)
-		x := &code.ErrReadExternalRequestFailed
-		x.AppendMessage(fmt.Sprintf("URL: %v", url))
-		return emptyResponse(), x
+		return emptyResponse(), code.ErrReadExternalRequestFailed
 	}
 
 	return result, nil
@@ -134,6 +124,7 @@ func sendHTTPRequest(req *http.Request) (*http.Response, error) {
 func handleResponse(resp *http.Response, responseContainer interface{}, log logger.Logger) (response.HttpResponse, error) {
 	var result response.HttpResponse
 	result.HTTPCode = resp.StatusCode
+	result.ContentType = resp.Header.Get("Content-Type")
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {

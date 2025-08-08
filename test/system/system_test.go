@@ -3,6 +3,7 @@
 package system_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -38,7 +39,7 @@ func setupServer(t *testing.T) (*http.Server, sqlmock.Sqlmock) {
 	t.Cleanup(patchLogger.Unpatch)
 
 	patchHTTP := monkey.PatchInstanceMethod(reflect.TypeOf(&transport.HTTPOutbound{}), "SendHTTPRequest", func(_ *transport.HTTPOutbound, _ logger.Logger) (response.HttpResponse, *codepkg.Code) {
-		return response.HttpResponse{HTTPCode: http.StatusOK, RawResponsePayload: &response.GenericResponse{}}, nil
+		return response.HttpResponse{HTTPCode: http.StatusOK, RawResponsePayload: &response.GenericResponse[any]{}}, nil
 	})
 	t.Cleanup(patchHTTP.Unpatch)
 
@@ -58,6 +59,13 @@ func TestSystemEchoIntegration(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code %d", rec.Code)
+	}
+	var resp response.GenericResponse[string]
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode == "" || resp.ReturnMessage == "" {
+		t.Fatalf("missing base response: %#v", resp)
 	}
 }
 func TestSystemLongIntegration(t *testing.T) {

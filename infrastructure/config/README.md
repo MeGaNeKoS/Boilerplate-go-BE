@@ -4,6 +4,18 @@ The `config` package loads YAML settings from a file into the `config.Cfg` varia
 
 A default `config.yaml` is provided at the repository root and a fully annotated example lives in `examples/config.yaml`.
 
+The `OpenAPI` section controls documentation settings such as the spec version
+(`3.0.3` or `3.1.0`) and the paths where the generated docs are served. For
+example:
+
+```yaml
+OpenAPI:
+  Version: "3.1.0"
+  Docs:
+    Public: "/docs/public"
+    Internal: "/docs/internal"
+```
+
 Load the configuration by passing the file path via the `--config` flag:
 
 ```bash

@@ -41,3 +41,8 @@ LogTarget:
   PerLevelFiles: {}
   VerboseLevel: "DEBUG"
   AlsoLogToStdout: true
+OpenAPI:
+  Version: "3.0.3"
+  Docs:
+    Public: "/docs/public"
+    Internal: "/docs/internal"

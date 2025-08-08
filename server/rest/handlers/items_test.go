@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,417 +8,294 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/bouk/monkey"
-	"github.com/go-chi/chi/v5"
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/humatest"
 
 	"project-template/infrastructure/config"
-	models "project-template/infrastructure/dto/item"
+	dtoitem "project-template/infrastructure/dto/item"
 	"project-template/infrastructure/dto/response"
 	"project-template/infrastructure/utils"
-	"project-template/outbound/service/example"
+	outbound "project-template/outbound"
+	example "project-template/outbound/service/example"
 	"project-template/pkg/code"
-       repoitem "project-template/repositories/item"
-       services "project-template/services/item"
+	"project-template/pkg/logger"
+	repoitem "project-template/repositories/item"
+	"project-template/server/rest/handlers/resthuma"
 )
 
-// --- stubs ---
-type stubLogger struct{}
-
-func (stubLogger) DebugF(string, ...interface{}) {}
-func (stubLogger) InfoF(string, ...interface{})  {}
-func (stubLogger) WarnF(string, ...interface{})  {}
-func (stubLogger) ErrorF(string, ...interface{}) {}
-func (stubLogger) FatalF(string, ...interface{}) {}
-func (stubLogger) ParentID() string              { return "p" }
-func (stubLogger) ChildID() string               { return "c" }
-func (stubLogger) CloseLogFile()                 {}
-
-type stubItemRepo struct{}
-
-func (stubItemRepo) Create(context.Context, *models.Item) error     { return nil }
-func (stubItemRepo) List(context.Context) ([]models.Item, error)    { return nil, nil }
-func (stubItemRepo) Get(context.Context, int) (*models.Item, error) { return nil, nil }
-func (stubItemRepo) Update(context.Context, *models.Item) error     { return nil }
-func (stubItemRepo) Delete(context.Context, int) error              { return nil }
-
-type stubRepo struct{}
-
-func (stubRepo) GetItemRepository() repoitem.Repository { return stubItemRepo{} }
-
-type stubExampleOutbound struct{}
-
-func (stubExampleOutbound) FetchItemByID(_ context.Context, id int) (models.Item, error) {
-	return models.Item{ID: id}, nil
+type mockItemRepo struct {
+	create func(context.Context, *dtoitem.Item) error
+	list   func(context.Context) ([]dtoitem.Item, error)
+	get    func(context.Context, int) (*dtoitem.Item, error)
+	update func(context.Context, *dtoitem.Item) error
+	delete func(context.Context, int) error
 }
-func (stubExampleOutbound) FetchItemByFilter(_ context.Context, filter string) ([]models.Item, error) {
+
+func (m mockItemRepo) Create(ctx context.Context, item *dtoitem.Item) error {
+	if m.create != nil {
+		return m.create(ctx, item)
+	}
+	return nil
+}
+func (m mockItemRepo) List(ctx context.Context) ([]dtoitem.Item, error) {
+	if m.list != nil {
+		return m.list(ctx)
+	}
+	return nil, nil
+}
+func (m mockItemRepo) Get(ctx context.Context, id int) (*dtoitem.Item, error) {
+	if m.get != nil {
+		return m.get(ctx, id)
+	}
+	return nil, nil
+}
+func (m mockItemRepo) Update(ctx context.Context, item *dtoitem.Item) error {
+	if m.update != nil {
+		return m.update(ctx, item)
+	}
+	return nil
+}
+func (m mockItemRepo) Delete(ctx context.Context, id int) error {
+	if m.delete != nil {
+		return m.delete(ctx, id)
+	}
+	return nil
+}
+
+type mockRepoAgg struct{ repo repoitem.Repository }
+
+func (m mockRepoAgg) GetItemRepository() repoitem.Repository { return m.repo }
+
+type noopLogger struct{}
+
+func (noopLogger) DebugF(string, ...interface{}) {}
+func (noopLogger) InfoF(string, ...interface{})  {}
+func (noopLogger) WarnF(string, ...interface{})  {}
+func (noopLogger) ErrorF(string, ...interface{}) {}
+func (noopLogger) FatalF(string, ...interface{}) {}
+func (noopLogger) ParentID() string              { return "" }
+func (noopLogger) ChildID() string               { return "" }
+
+var _ logger.Logger = (*noopLogger)(nil)
+
+type mockExampleOutbound struct {
+	fetchByIDCalled bool
+}
+
+func (m *mockExampleOutbound) FetchItemByID(ctx context.Context, id int) (dtoitem.Item, error) {
+	m.fetchByIDCalled = true
+	return dtoitem.Item{}, nil
+}
+func (m *mockExampleOutbound) FetchItemByFilter(ctx context.Context, filter string) ([]dtoitem.Item, error) {
 	return nil, nil
 }
 
-type stubExampleAgg struct{}
+type mockExampleService struct{ out example.ExampleOutbound }
 
-func (stubExampleAgg) HTTP() example.ExampleOutbound       { return stubExampleOutbound{} }
-func (stubExampleAgg) GRPC() example.ExampleGRPCOutbound   { return nil }
-func (stubExampleAgg) Kafka() example.ExampleKafkaOutbound { return nil }
+func (m mockExampleService) HTTP() example.ExampleOutbound       { return m.out }
+func (m mockExampleService) GRPC() example.ExampleGRPCOutbound   { return nil }
+func (m mockExampleService) Kafka() example.ExampleKafkaOutbound { return nil }
 
-type stubOutbound struct{}
+type mockOutboundAgg struct{ svc example.Service }
 
-func (stubOutbound) Example() example.Service { return stubExampleAgg{} }
+func (m mockOutboundAgg) Example() example.Service { return m.svc }
 
-type stubService struct {
-	createItem models.Item
-	createErr  *code.Code
-	listItems  []models.Item
-	listErr    *code.Code
-	getItem    models.Item
-	getErr     *code.Code
-	updateItem models.Item
-	updateErr  *code.Code
-	deleteErr  *code.Code
-}
+var _ outbound.Impl = (*mockOutboundAgg)(nil)
 
-func (s stubService) CreateItem(context.Context, models.Item) (models.Item, *code.Code) {
-	return s.createItem, s.createErr
-}
-func (s stubService) ListItems(context.Context) ([]models.Item, *code.Code) {
-	return s.listItems, s.listErr
-}
-func (s stubService) GetItem(context.Context, int) (models.Item, *code.Code) {
-	return s.getItem, s.getErr
-}
-func (s stubService) UpdateItem(context.Context, models.Item) (models.Item, *code.Code) {
-	return s.updateItem, s.updateErr
-}
-func (s stubService) DeleteItem(context.Context, int) *code.Code { return s.deleteErr }
-
-// --- helpers ---
-func routeCtxWithID(id string) context.Context {
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", id)
-	return context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
-}
-
-type errReader struct{}
-
-func (errReader) Read([]byte) (int, error) { return 0, errors.New("boom") }
-
-// Close implements io.Closer.
-func (errReader) Close() error { return nil }
-
-// --- tests ---
-func TestSendResponse(t *testing.T) {
-	config.Cfg = &config.Config{AppName: "APP"}
-	rec := httptest.NewRecorder()
-	sendResponse(rec, utils.GenerateSuccessResponse(map[string]string{"a": "b"}))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("code %d", rec.Code)
-	}
-	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
-		t.Fatalf("content type %s", ct)
-	}
-	var resp response.GenericResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatal(err)
-	}
-	m := resp.Body.(map[string]interface{})
-	if m["a"] != "b" {
-		t.Fatalf("body %#v", m)
-	}
-
-	rec2 := httptest.NewRecorder()
-	sendResponse(rec2, &response.HttpResponse{HTTPCode: http.StatusNoContent})
-	if rec2.Code != http.StatusNoContent || rec2.Body.Len() != 0 {
-		t.Fatalf("no content failed")
-	}
-}
-
-func TestServiceFromContext(t *testing.T) {
-	if svc := serviceFromContext(context.Background()); svc != nil {
-		t.Fatalf("expected nil")
-	}
+func setupCtx(repo repoitem.Repository, exOutbound example.ExampleOutbound) context.Context {
 	ctx := context.Background()
-	ctx = utils.SetRepoCtx(ctx, stubRepo{})
-	ctx = utils.SetOutboundCtx(ctx, stubOutbound{})
-	ctx = utils.SetLoggerToContext(ctx, stubLogger{})
-	if svc := serviceFromContext(ctx); svc == nil {
-		t.Fatalf("nil service")
+	ctx = utils.SetRepoCtx(ctx, mockRepoAgg{repo})
+	ctx = utils.SetOutboundCtx(ctx, mockOutboundAgg{mockExampleService{exOutbound}})
+	ctx = utils.SetLoggerToContext(ctx, noopLogger{})
+	return ctx
+}
+
+func decodeBody[T any](t *testing.T, resp *resthuma.Response[*response.GenericResponse[T]]) response.GenericResponse[T] {
+	rec := httptest.NewRecorder()
+	ctx := humatest.NewContext(nil, httptest.NewRequest(http.MethodGet, "/", nil), rec)
+	resp.Body(ctx)
+	var out response.GenericResponse[T]
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return out
+}
+
+func expectInternal(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	se, ok := err.(huma.StatusError)
+	if !ok || se.GetStatus() != http.StatusInternalServerError {
+		t.Fatalf("unexpected error %#v", err)
 	}
 }
 
-func TestListItemsHandler(t *testing.T) {
+func TestListItems(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl {
-		return stubService{listItems: []models.Item{{ID: 1, Name: "a"}}}
-	})
-	defer patch.Unpatch()
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	ListItemsHandler(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("code %d", rec.Code)
+	repo := mockItemRepo{list: func(context.Context) ([]dtoitem.Item, error) {
+		return []dtoitem.Item{{ID: 1, Name: "a"}}, nil
+	}}
+	ctx := setupCtx(repo, &mockExampleOutbound{})
+	resp, err := ListItems(ctx, &dtoitem.ListItemsInput{})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
 	}
-	var resp response.GenericResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatal(err)
-	}
-	items := resp.Body.([]interface{})
-	if len(items) != 1 {
-		t.Fatalf("items %#v", items)
+	out := decodeBody(t, resp)
+	if len(out.Body) != 1 || out.Body[0].Name != "a" {
+		t.Fatalf("body %#v", out.Body)
 	}
 }
 
-func TestListItemsHandlerError(t *testing.T) {
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl {
-		return stubService{listErr: &code.ErrInternalServerError}
-	})
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	ListItemsHandler(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("code %d", rec.Code)
-	}
-}
-
-func TestListItemsHandlerMissing(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	ListItemsHandler(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("code %d", rec.Code)
-	}
-}
-
-func TestCreateItemHandler(t *testing.T) {
+func TestListItemsError(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl {
-		return stubService{createItem: models.Item{ID: 2, Name: "b"}}
-	})
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"name":"b"}`))
-	rec := httptest.NewRecorder()
-	CreateItemHandler(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("code %d", rec.Code)
+	repo := mockItemRepo{list: func(context.Context) ([]dtoitem.Item, error) {
+		return nil, errors.New("fail")
+	}}
+	ctx := setupCtx(repo, &mockExampleOutbound{})
+	if _, err := ListItems(ctx, &dtoitem.ListItemsInput{}); err == nil {
+		t.Fatalf("expected error")
 	}
 }
 
-func TestCreateItemHandlerBadBody(t *testing.T) {
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl { return stubService{} })
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodPost, "/", errReader{})
-	rec := httptest.NewRecorder()
-	CreateItemHandler(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("code %d", rec.Code)
-	}
-}
-
-func TestCreateItemHandlerInvalidJSON(t *testing.T) {
+func TestCreateItem(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl { return stubService{} })
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("{"))
-	rec := httptest.NewRecorder()
-	CreateItemHandler(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("code %d", rec.Code)
+	repo := mockItemRepo{create: func(ctx context.Context, item *dtoitem.Item) error {
+		item.ID = 5
+		return nil
+	}}
+	ctx := setupCtx(repo, &mockExampleOutbound{})
+	in := &dtoitem.CreateItemInput{Body: dtoitem.Item{Name: "x"}}
+	resp, err := CreateItem(ctx, in)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if resp.GetHeaders().Get("Location") != "/items/5" {
+		t.Fatalf("location %q", resp.GetHeaders().Get("Location"))
+	}
+	out := decodeBody(t, resp)
+	if out.Body.ID != 5 {
+		t.Fatalf("body %#v", out.Body)
 	}
 }
 
-func TestCreateItemHandlerError(t *testing.T) {
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl {
-		return stubService{createErr: &code.ErrInternalServerError}
-	})
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(`{"name":"b"}`))
-	rec := httptest.NewRecorder()
-	CreateItemHandler(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("code %d", rec.Code)
-	}
-}
-
-func TestCreateItemHandlerMissing(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
-	rec := httptest.NewRecorder()
-	CreateItemHandler(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("code %d", rec.Code)
-	}
-}
-
-func TestGetItemHandler(t *testing.T) {
+func TestCreateItemError(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl {
-		return stubService{getItem: models.Item{ID: 3, Name: "c"}}
-	})
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req = req.WithContext(routeCtxWithID("3"))
-	rec := httptest.NewRecorder()
-	GetItemHandler(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("code %d", rec.Code)
+	repo := mockItemRepo{create: func(context.Context, *dtoitem.Item) error { return errors.New("boom") }}
+	ctx := setupCtx(repo, &mockExampleOutbound{})
+	if _, err := CreateItem(ctx, &dtoitem.CreateItemInput{Body: dtoitem.Item{Name: "x"}}); err == nil {
+		t.Fatalf("expected error")
 	}
 }
 
-func TestGetItemHandlerBadID(t *testing.T) {
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl { return stubService{} })
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req = req.WithContext(routeCtxWithID("bad"))
-	rec := httptest.NewRecorder()
-	GetItemHandler(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("code %d", rec.Code)
-	}
-}
-
-func TestGetItemHandlerError(t *testing.T) {
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl {
-		return stubService{getErr: &code.ErrItemNotFound}
-	})
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req = req.WithContext(routeCtxWithID("1"))
-	rec := httptest.NewRecorder()
-	GetItemHandler(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("code %d", rec.Code)
-	}
-}
-
-func TestGetItemHandlerMissing(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req = req.WithContext(routeCtxWithID("1"))
-	rec := httptest.NewRecorder()
-	GetItemHandler(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("code %d", rec.Code)
-	}
-}
-
-func TestUpdateItemHandler(t *testing.T) {
+func TestGetItem(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl {
-		return stubService{updateItem: models.Item{ID: 4, Name: "d"}}
-	})
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodPut, "/", bytes.NewBufferString(`{"name":"d"}`))
-	req = req.WithContext(routeCtxWithID("4"))
-	rec := httptest.NewRecorder()
-	UpdateItemHandler(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("code %d", rec.Code)
+	repo := mockItemRepo{get: func(ctx context.Context, id int) (*dtoitem.Item, error) {
+		return &dtoitem.Item{ID: id, Name: "y"}, nil
+	}}
+	ctx := setupCtx(repo, &mockExampleOutbound{})
+	resp, err := GetItem(ctx, &dtoitem.IDPath{ID: 7})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	out := decodeBody(t, resp)
+	if out.Body.ID != 7 || out.Body.Name != "y" {
+		t.Fatalf("body %#v", out.Body)
 	}
 }
 
-func TestUpdateItemHandlerBadBody(t *testing.T) {
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl { return stubService{} })
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodPut, "/", errReader{})
-	req = req.WithContext(routeCtxWithID("1"))
-	rec := httptest.NewRecorder()
-	UpdateItemHandler(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("code %d", rec.Code)
-	}
-}
-
-func TestUpdateItemHandlerBadID(t *testing.T) {
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl { return stubService{} })
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodPut, "/", bytes.NewBufferString(`{"name":"x"}`))
-	req = req.WithContext(routeCtxWithID("bad"))
-	rec := httptest.NewRecorder()
-	UpdateItemHandler(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("code %d", rec.Code)
-	}
-}
-
-func TestUpdateItemHandlerInvalidJSON(t *testing.T) {
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl { return stubService{} })
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodPut, "/", bytes.NewBufferString("{"))
-	req = req.WithContext(routeCtxWithID("1"))
-	rec := httptest.NewRecorder()
-	UpdateItemHandler(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("code %d", rec.Code)
-	}
-}
-
-func TestUpdateItemHandlerError(t *testing.T) {
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl {
-		return stubService{updateErr: &code.ErrInternalServerError}
-	})
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodPut, "/", bytes.NewBufferString(`{"name":"x"}`))
-	req = req.WithContext(routeCtxWithID("1"))
-	rec := httptest.NewRecorder()
-	UpdateItemHandler(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("code %d", rec.Code)
-	}
-}
-
-func TestUpdateItemHandlerMissing(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPut, "/", nil)
-	req = req.WithContext(routeCtxWithID("1"))
-	rec := httptest.NewRecorder()
-	UpdateItemHandler(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("code %d", rec.Code)
-	}
-}
-
-func TestDeleteItemHandler(t *testing.T) {
+func TestGetItemNotFound(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl { return stubService{} })
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodDelete, "/", nil)
-	req = req.WithContext(routeCtxWithID("1"))
-	rec := httptest.NewRecorder()
-	DeleteItemHandler(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("code %d", rec.Code)
+	repo := mockItemRepo{get: func(context.Context, int) (*dtoitem.Item, error) { return nil, code.ErrItemNotFound }}
+	ctx := setupCtx(repo, &mockExampleOutbound{})
+	if _, err := GetItem(ctx, &dtoitem.IDPath{ID: 1}); err == nil {
+		t.Fatalf("expected error")
 	}
 }
 
-func TestDeleteItemHandlerBadID(t *testing.T) {
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl { return stubService{} })
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodDelete, "/", nil)
-	req = req.WithContext(routeCtxWithID("bad"))
-	rec := httptest.NewRecorder()
-	DeleteItemHandler(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("code %d", rec.Code)
+func TestUpdateItem(t *testing.T) {
+	config.Cfg = &config.Config{AppName: "APP"}
+	outbound := &mockExampleOutbound{}
+	repo := mockItemRepo{update: func(ctx context.Context, item *dtoitem.Item) error { return nil }}
+	ctx := setupCtx(repo, outbound)
+	in := &dtoitem.UpdateItemInput{ID: 3, Body: dtoitem.Item{Name: "z"}}
+	resp, err := UpdateItem(ctx, in)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !outbound.fetchByIDCalled {
+		t.Fatalf("expected fetch call")
+	}
+	out := decodeBody(t, resp)
+	if out.Body.ID != 3 || out.Body.Name != "z" {
+		t.Fatalf("body %#v", out.Body)
 	}
 }
 
-func TestDeleteItemHandlerError(t *testing.T) {
-	patch := monkey.Patch(serviceFromContext, func(context.Context) services.ServiceImpl {
-		return stubService{deleteErr: &code.ErrInternalServerError}
-	})
-	defer patch.Unpatch()
-	req := httptest.NewRequest(http.MethodDelete, "/", nil)
-	req = req.WithContext(routeCtxWithID("1"))
-	rec := httptest.NewRecorder()
-	DeleteItemHandler(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("code %d", rec.Code)
+func TestUpdateItemError(t *testing.T) {
+	config.Cfg = &config.Config{AppName: "APP"}
+	repo := mockItemRepo{update: func(context.Context, *dtoitem.Item) error { return code.ErrItemNotFound }}
+	ctx := setupCtx(repo, &mockExampleOutbound{})
+	in := &dtoitem.UpdateItemInput{ID: 2, Body: dtoitem.Item{Name: "a"}}
+	if _, err := UpdateItem(ctx, in); err == nil {
+		t.Fatalf("expected error")
 	}
 }
 
-func TestDeleteItemHandlerMissing(t *testing.T) {
-	req := httptest.NewRequest(http.MethodDelete, "/", nil)
-	req = req.WithContext(routeCtxWithID("1"))
+func TestDeleteItem(t *testing.T) {
+	config.Cfg = &config.Config{AppName: "APP"}
+	repo := mockItemRepo{delete: func(context.Context, int) error { return nil }}
+	ctx := setupCtx(repo, &mockExampleOutbound{})
+	resp, err := DeleteItem(ctx, &dtoitem.IDPath{ID: 9})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
 	rec := httptest.NewRecorder()
-	DeleteItemHandler(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("code %d", rec.Code)
+	ctx2 := humatest.NewContext(nil, httptest.NewRequest(http.MethodDelete, "/", nil), rec)
+	resp.Body(ctx2)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status %d", rec.Code)
+	}
+}
+
+func TestDeleteItemError(t *testing.T) {
+	config.Cfg = &config.Config{AppName: "APP"}
+	repo := mockItemRepo{delete: func(context.Context, int) error { return code.ErrItemNotFound }}
+	ctx := setupCtx(repo, &mockExampleOutbound{})
+	if _, err := DeleteItem(ctx, &dtoitem.IDPath{ID: 1}); err == nil {
+		t.Fatalf("expected error")
+	}
+}
+
+func TestListItemsNoService(t *testing.T) {
+	_, err := ListItems(context.Background(), &dtoitem.ListItemsInput{})
+	expectInternal(t, err)
+}
+
+func TestCreateItemNoService(t *testing.T) {
+	_, err := CreateItem(context.Background(), &dtoitem.CreateItemInput{Body: dtoitem.Item{}})
+	expectInternal(t, err)
+}
+
+func TestGetItemNoService(t *testing.T) {
+	_, err := GetItem(context.Background(), &dtoitem.IDPath{ID: 1})
+	expectInternal(t, err)
+}
+
+func TestUpdateItemNoService(t *testing.T) {
+	in := &dtoitem.UpdateItemInput{ID: 1, Body: dtoitem.Item{}}
+	_, err := UpdateItem(context.Background(), in)
+	expectInternal(t, err)
+}
+
+func TestDeleteItemNoService(t *testing.T) {
+	_, err := DeleteItem(context.Background(), &dtoitem.IDPath{ID: 1})
+	expectInternal(t, err)
+}
+
+func TestServiceFromContextMissing(t *testing.T) {
+	if svc := serviceFromContext(context.Background()); svc != nil {
+		t.Fatalf("expected nil service")
 	}
 }

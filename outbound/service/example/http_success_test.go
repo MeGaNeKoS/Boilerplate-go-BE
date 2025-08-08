@@ -22,7 +22,9 @@ func TestFetchItemByIDSuccess(t *testing.T) {
 	o := &exampleOutbound{log: l}
 
 	monkey.PatchInstanceMethod(reflect.TypeOf(&transport.HTTPOutbound{}), "SendHTTPRequest", func(_ *transport.HTTPOutbound, _ logger.Logger) (response.HttpResponse, *codepkg.Code) {
-		return response.HttpResponse{RawResponsePayload: &response.GenericResponse{Body: models.Item{ID: 5, Name: "n"}}, HTTPCode: http.StatusOK}, nil
+		gr := &response.GenericResponse[any]{}
+		gr.Body = models.Item{ID: 5, Name: "n"}
+		return response.HttpResponse{RawResponsePayload: gr, HTTPCode: http.StatusOK}, nil
 	})
 	defer monkey.UnpatchAll()
 
@@ -41,7 +43,9 @@ func TestFetchItemByFilterSuccess(t *testing.T) {
 	o := &exampleOutbound{log: l}
 
 	monkey.PatchInstanceMethod(reflect.TypeOf(&transport.HTTPOutbound{}), "SendHTTPRequest", func(_ *transport.HTTPOutbound, _ logger.Logger) (response.HttpResponse, *codepkg.Code) {
-		return response.HttpResponse{RawResponsePayload: &response.GenericResponse{Body: []models.Item{{ID: 2, Name: "z"}}}, HTTPCode: http.StatusOK}, nil
+		gr := &response.GenericResponse[any]{}
+		gr.Body = []models.Item{{ID: 2, Name: "z"}}
+		return response.HttpResponse{RawResponsePayload: gr, HTTPCode: http.StatusOK}, nil
 	})
 	defer monkey.UnpatchAll()
 
