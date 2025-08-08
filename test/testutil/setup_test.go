@@ -18,12 +18,12 @@ import (
 )
 
 func TestNewDBMock(t *testing.T) {
-	db, mock := NewDBMock(t)
-	if db == nil || mock == nil {
+	dbMock, mock := NewDBMock(t)
+	if dbMock == nil || mock == nil {
 		t.Fatalf("nil")
 	}
 	mock.ExpectPing()
-	if err := db.Ping(); err != nil {
+	if err := dbMock.Ping(); err != nil {
 		t.Fatal(err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
