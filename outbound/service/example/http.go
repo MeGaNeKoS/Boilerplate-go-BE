@@ -34,15 +34,20 @@ func (o *exampleOutbound) headers(ctx context.Context) map[string]string {
 	}
 }
 
+// getTransport returns a preconfigured HTTP outbound with host and default headers.
+func (o *exampleOutbound) getTransport(ctx context.Context) *transport.HTTPOutbound {
+	return &transport.HTTPOutbound{
+		Host:    config.Cfg.Service.Example.Host,
+		Headers: o.headers(ctx),
+	}
+}
+
 // FetchItemByID performs a GET request to retrieve an item.
 func (o *exampleOutbound) FetchItemByID(ctx context.Context, id int) (models.Item, error) {
-	req := transport.HTTPOutbound{
-		Host:     config.Cfg.Service.Example.Host,
-		Path:     fmt.Sprintf("/items/%d", id),
-		Method:   http.MethodGet,
-		Headers:  o.headers(ctx),
-		Response: &response.GenericResponse[any]{},
-	}
+	req := o.getTransport(ctx).
+		WithPath(fmt.Sprintf("/items/%d", id)).
+		WithMethod(http.MethodGet).
+		WithResponse(&response.GenericResponse[any]{})
 
 	resp, code := req.SendHTTPRequest(o.log)
 	if code != nil {
@@ -73,13 +78,10 @@ func (o *exampleOutbound) FetchItemByFilter(ctx context.Context, filter string) 
 		path += "?filter=" + url.QueryEscape(filter)
 	}
 
-	req := transport.HTTPOutbound{
-		Host:     config.Cfg.Service.Example.Host,
-		Path:     path,
-		Method:   http.MethodGet,
-		Headers:  o.headers(ctx),
-		Response: &response.GenericResponse[any]{},
-	}
+	req := o.getTransport(ctx).
+		WithPath(path).
+		WithMethod(http.MethodGet).
+		WithResponse(&response.GenericResponse[any]{})
 
 	resp, code := req.SendHTTPRequest(o.log)
 	if code != nil {

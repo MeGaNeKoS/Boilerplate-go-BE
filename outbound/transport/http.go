@@ -37,6 +37,60 @@ func (o *HTTPOutbound) Copy() *HTTPOutbound {
 	return copied.(*HTTPOutbound)
 }
 
+// WithPath sets the request path.
+func (o *HTTPOutbound) WithPath(path string) *HTTPOutbound {
+	o.Path = path
+	return o
+}
+
+// WithMethod sets the HTTP method.
+func (o *HTTPOutbound) WithMethod(method string) *HTTPOutbound {
+	o.Method = method
+	return o
+}
+
+// WithHeader adds or replaces a single header.
+func (o *HTTPOutbound) WithHeader(key, value string) *HTTPOutbound {
+	if o.Headers == nil {
+		o.Headers = make(map[string]string)
+	}
+	o.Headers[key] = value
+	return o
+}
+
+// WithHeaders merges the provided headers into the request.
+func (o *HTTPOutbound) WithHeaders(h map[string]string) *HTTPOutbound {
+	if len(h) == 0 {
+		return o
+	}
+	if o.Headers == nil {
+		o.Headers = make(map[string]string, len(h))
+	}
+	for k, v := range h {
+		o.Headers[k] = v
+	}
+	return o
+}
+
+// ReplaceHeaders overwrites the existing headers with the given map.
+func (o *HTTPOutbound) ReplaceHeaders(h map[string]string) *HTTPOutbound {
+	if len(h) == 0 {
+		o.Headers = nil
+		return o
+	}
+	o.Headers = make(map[string]string, len(h))
+	for k, v := range h {
+		o.Headers[k] = v
+	}
+	return o
+}
+
+// WithResponse sets the placeholder used to decode the response body.
+func (o *HTTPOutbound) WithResponse(resp interface{}) *HTTPOutbound {
+	o.Response = resp
+	return o
+}
+
 // SendHTTPRequest executes the outbound HTTP request using the provided logger
 // for tracing and error reporting. The method returns the decoded response
 // payload along with a potential error code if the request fails.

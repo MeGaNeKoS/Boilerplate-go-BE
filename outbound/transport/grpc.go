@@ -20,6 +20,51 @@ type GRPCOutbound struct {
 	Metadata map[string]string
 }
 
+// WithMethod sets the fully-qualified RPC method.
+func (o *GRPCOutbound) WithMethod(method string) *GRPCOutbound {
+	o.Method = method
+	return o
+}
+
+// WithRequest sets the request payload.
+func (o *GRPCOutbound) WithRequest(req interface{}) *GRPCOutbound {
+	o.Request = req
+	return o
+}
+
+// WithResponse sets the response placeholder.
+func (o *GRPCOutbound) WithResponse(resp interface{}) *GRPCOutbound {
+	o.Response = resp
+	return o
+}
+
+// WithMetadata merges the given metadata into the call.
+func (o *GRPCOutbound) WithMetadata(md map[string]string) *GRPCOutbound {
+	if len(md) == 0 {
+		return o
+	}
+	if o.Metadata == nil {
+		o.Metadata = make(map[string]string, len(md))
+	}
+	for k, v := range md {
+		o.Metadata[k] = v
+	}
+	return o
+}
+
+// ReplaceMetadata overwrites existing metadata.
+func (o *GRPCOutbound) ReplaceMetadata(md map[string]string) *GRPCOutbound {
+	if len(md) == 0 {
+		o.Metadata = nil
+		return o
+	}
+	o.Metadata = make(map[string]string, len(md))
+	for k, v := range md {
+		o.Metadata[k] = v
+	}
+	return o
+}
+
 // Invoke performs the gRPC call and unmarshals the response into the provided
 // Response type. The returned value will be of the same concrete type as
 // Response.

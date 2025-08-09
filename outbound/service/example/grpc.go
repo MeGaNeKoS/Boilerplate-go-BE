@@ -26,14 +26,20 @@ func (e *exampleGRPCOutbound) headers(ctx context.Context) map[string]string {
 		"Parent-Id":     e.log.ParentID(),
 	}
 }
-func (e *exampleGRPCOutbound) GetItem(ctx context.Context, id int) (*pb.Item, error) {
-	call := transport.GRPCOutbound{
+
+// getTransport returns a preconfigured gRPC outbound with host and metadata.
+func (e *exampleGRPCOutbound) getTransport(ctx context.Context) *transport.GRPCOutbound {
+	return &transport.GRPCOutbound{
 		Host:     config.Cfg.Service.Example.Host,
-		Method:   "/pb.ItemService/GetItem",
-		Request:  &pb.ItemID{Id: int32(id)},
-		Response: &pb.Item{},
 		Metadata: e.headers(ctx),
 	}
+}
+
+func (e *exampleGRPCOutbound) GetItem(ctx context.Context, id int) (*pb.Item, error) {
+	call := e.getTransport(ctx).
+		WithMethod("/pb.ItemService/GetItem").
+		WithRequest(&pb.ItemID{Id: int32(id)}).
+		WithResponse(&pb.Item{})
 	resp, err := call.Invoke(ctx, e.log)
 	if err != nil {
 		return nil, fmt.Errorf("grpc call failed: %w", err)

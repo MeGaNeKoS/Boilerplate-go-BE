@@ -11,6 +11,7 @@ import (
 	"project-template/infrastructure/config"
 	models "project-template/infrastructure/dto/item"
 	"project-template/infrastructure/dto/response"
+	"project-template/infrastructure/utils"
 	"project-template/outbound/transport"
 	codepkg "project-template/pkg/code"
 	"project-template/pkg/logger"
@@ -19,7 +20,7 @@ import (
 func TestFetchItemByIDSuccess(t *testing.T) {
 	config.Cfg = &config.Config{Service: config.Service{Example: config.ServiceDetail{Host: "h"}}}
 	l := stubLogger{parent: "p"}
-	o := &exampleOutbound{log: l}
+	o := NewExampleOutbound(l)
 
 	monkey.PatchInstanceMethod(reflect.TypeOf(&transport.HTTPOutbound{}), "SendHTTPRequest", func(_ *transport.HTTPOutbound, _ logger.Logger) (response.HttpResponse, *codepkg.Code) {
 		gr := &response.GenericResponse[any]{}
@@ -40,7 +41,7 @@ func TestFetchItemByIDSuccess(t *testing.T) {
 func TestFetchItemByFilterSuccess(t *testing.T) {
 	config.Cfg = &config.Config{Service: config.Service{Example: config.ServiceDetail{Host: "h"}}}
 	l := stubLogger{parent: "p"}
-	o := &exampleOutbound{log: l}
+	o := NewExampleOutbound(l)
 
 	monkey.PatchInstanceMethod(reflect.TypeOf(&transport.HTTPOutbound{}), "SendHTTPRequest", func(_ *transport.HTTPOutbound, _ logger.Logger) (response.HttpResponse, *codepkg.Code) {
 		gr := &response.GenericResponse[any]{}
@@ -55,5 +56,30 @@ func TestFetchItemByFilterSuccess(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].ID != 2 || items[0].Name != "z" {
 		t.Fatalf("unexpected items %#v", items)
+	}
+}
+
+// Test that FetchItemByID includes token and parent id headers.
+func TestFetchItemByIDSendsHeaders(t *testing.T) {
+	config.Cfg = &config.Config{Service: config.Service{Example: config.ServiceDetail{Host: "h"}}}
+	l := stubLogger{parent: "p"}
+	o := NewExampleOutbound(l)
+	ctx := utils.SetTokenCtx(context.Background(), utils.SecureString("tok"))
+
+	var headers map[string]string
+	monkey.PatchInstanceMethod(reflect.TypeOf(&transport.HTTPOutbound{}), "SendHTTPRequest", func(out *transport.HTTPOutbound, _ logger.Logger) (response.HttpResponse, *codepkg.Code) {
+		headers = out.Headers
+		return response.HttpResponse{RawResponsePayload: &response.GenericResponse[any]{}, HTTPCode: http.StatusOK}, nil
+	})
+	defer monkey.UnpatchAll()
+
+	if _, err := o.FetchItemByID(ctx, 1); err != nil {
+		t.Fatalf("FetchItemByID error: %v", err)
+	}
+	if headers["Authorization"] != "Bearer tok" {
+		t.Fatalf("expected Authorization header with token, got %q", headers["Authorization"])
+	}
+	if headers["Parent-Id"] != l.parent {
+		t.Fatalf("expected Parent-Id %q, got %q", l.parent, headers["Parent-Id"])
 	}
 }
