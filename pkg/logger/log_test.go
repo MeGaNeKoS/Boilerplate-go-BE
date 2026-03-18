@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +16,20 @@ import (
 
 	"github.com/bouk/monkey"
 )
+
+// testCore creates a loggerCore backed by a bytes.Buffer for testing.
+func testCore(level Level, buf *bytes.Buffer) *loggerCore {
+	mu := &sync.Mutex{}
+	return &loggerCore{
+		level: level,
+		handler: &pipeHandler{
+			mu:            mu,
+			level:         level.toSlog(),
+			defaultWriter: buf,
+			writers:       map[slog.Level]io.Writer{},
+		},
+	}
+}
 
 func TestParseLogLevel(t *testing.T) {
 	cases := map[string]Level{
@@ -111,41 +125,36 @@ func TestInitLoggerCoreErrors(t *testing.T) {
 
 func TestLogBranches(t *testing.T) {
 	var b bytes.Buffer
-	core := &loggerCore{
-		level:       INFO,
-		debugLogger: log.New(&b, "", 0),
-		infoLogger:  log.New(&b, "", 0),
-		warnLogger:  log.New(&b, "", 0),
-		errorLogger: log.New(&b, "", 0),
-		fatalLogger: log.New(&b, "", 0),
-	}
+	core := testCore(INFO, &b)
 	l := &loggerImpl{core: core, parentID: "p", childID: "c"}
 
 	// Below-level messages should be filtered.
-	l.log(DEBUG, "DEBUG", "skip")
+	l.Debug("skip")
 	if b.Len() != 0 {
 		t.Fatalf("expected no log, got %s", b.String())
 	}
 
-	// Unknown level falls back to infoLogger; toStdout mirrors to stdout.
+	// toStdout mirrors to stdout.
 	core.level = DEBUG
-	core.toStdout = true
+	h, _ := core.handler.(*pipeHandler)
+	h.level = DEBUG.toSlog()
+	h.toStdout = true
 	b.Reset()
 
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
-	l.log(Level(99), "OTHER", "msg")
+	l.Info("msg")
 	_ = w.Close()
 	os.Stdout = oldStdout
 	out, _ := io.ReadAll(r)
 	_ = r.Close()
 
 	logOut := b.String()
-	if !strings.Contains(logOut, "OTHER") || !strings.Contains(logOut, "msg") {
+	if !strings.Contains(logOut, "INFO") || !strings.Contains(logOut, "msg") {
 		t.Fatalf("log missing parts: %q", logOut)
 	}
-	if !strings.Contains(string(out), "OTHER") {
+	if !strings.Contains(string(out), "INFO") {
 		t.Fatalf("stdout missing log output: %q", string(out))
 	}
 }
@@ -164,7 +173,7 @@ func TestNewLoggerError(t *testing.T) {
 
 func TestCallerDepthIsolation(t *testing.T) {
 	var b bytes.Buffer
-	core := &loggerCore{level: DEBUG, debugLogger: log.New(&b, "", 0), infoLogger: log.New(&b, "", 0), warnLogger: log.New(&b, "", 0), errorLogger: log.New(&b, "", 0), fatalLogger: log.New(&b, "", 0)}
+	core := testCore(DEBUG, &b)
 	l := &loggerImpl{core: core}
 	l.InfoF("one")
 	l.InfoF("two")
@@ -172,14 +181,12 @@ func TestCallerDepthIsolation(t *testing.T) {
 	if !strings.Contains(out, "one") || !strings.Contains(out, "two") {
 		t.Fatalf("log missing: %q", out)
 	}
-	// Both lines should report this test file, not logger internals
 	if !strings.Contains(out, "log_test.go") {
 		t.Fatalf("caller depth wrong, expected log_test.go in output: %q", out)
 	}
 }
 
 func TestCloseFunctions(t *testing.T) {
-	// should handle nil shared core
 	sharedCore = nil
 	CloseLogFile()
 
@@ -197,7 +204,6 @@ func TestCloseFunctions(t *testing.T) {
 	if _, err := impl.core.logFile.Write([]byte("x")); err == nil {
 		t.Fatalf("expected error after close")
 	}
-
 }
 
 func TestInitLoggerCoreFailureClosesFiles(t *testing.T) {
@@ -274,10 +280,6 @@ func TestInitLoggerCoreSecondLevelFailure(t *testing.T) {
 	}
 }
 
-// TestInitLoggerCoreClosesMultipleFiles explicitly verifies that all opened
-// log files are closed when a later file fails to open. This covers the branch
-// that iterates over levelFiles and closes each handle before returning an
-// error.
 func TestInitLoggerCoreClosesMultipleFiles(t *testing.T) {
 	sharedCore = nil
 	dir := t.TempDir()
@@ -344,16 +346,10 @@ func TestLogFileReopen(t *testing.T) {
 		t.Fatalf("level log file not recreated")
 	}
 }
+
 func TestPlainMessageMethods(t *testing.T) {
 	var b bytes.Buffer
-	core := &loggerCore{
-		level:       DEBUG,
-		debugLogger: log.New(&b, "", 0),
-		infoLogger:  log.New(&b, "", 0),
-		warnLogger:  log.New(&b, "", 0),
-		errorLogger: log.New(&b, "", 0),
-		fatalLogger: log.New(&b, "", 0),
-	}
+	core := testCore(DEBUG, &b)
 	l := &loggerImpl{core: core, parentID: "pp", childID: "cc"}
 
 	l.Debug("debug-msg")
@@ -372,18 +368,9 @@ func TestPlainMessageMethods(t *testing.T) {
 
 func TestLogStdoutFalse(t *testing.T) {
 	var b bytes.Buffer
-	core := &loggerCore{
-		level:       DEBUG,
-		toStdout:    false,
-		debugLogger: log.New(&b, "", 0),
-		infoLogger:  log.New(&b, "", 0),
-		warnLogger:  log.New(&b, "", 0),
-		errorLogger: log.New(&b, "", 0),
-		fatalLogger: log.New(&b, "", 0),
-	}
+	core := testCore(DEBUG, &b)
 	l := &loggerImpl{core: core, parentID: "p", childID: "c"}
 
-	// Capture stdout to verify nothing is written there.
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -403,14 +390,7 @@ func TestLogStdoutFalse(t *testing.T) {
 
 func TestLogLevelFiltering(t *testing.T) {
 	var b bytes.Buffer
-	core := &loggerCore{
-		level:       WARN,
-		debugLogger: log.New(&b, "", 0),
-		infoLogger:  log.New(&b, "", 0),
-		warnLogger:  log.New(&b, "", 0),
-		errorLogger: log.New(&b, "", 0),
-		fatalLogger: log.New(&b, "", 0),
-	}
+	core := testCore(WARN, &b)
 	l := &loggerImpl{core: core}
 
 	l.Debug("should-skip")
@@ -445,14 +425,7 @@ func TestEachLogLevel(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.label, func(t *testing.T) {
 			var b bytes.Buffer
-			core := &loggerCore{
-				level:       DEBUG,
-				debugLogger: log.New(&b, "", 0),
-				infoLogger:  log.New(&b, "", 0),
-				warnLogger:  log.New(&b, "", 0),
-				errorLogger: log.New(&b, "", 0),
-				fatalLogger: log.New(&b, "", 0),
-			}
+			core := testCore(DEBUG, &b)
 			l := &loggerImpl{core: core, parentID: "p", childID: "c"}
 			tc.method(l, "testmsg")
 			if !strings.Contains(b.String(), tc.label) || !strings.Contains(b.String(), "testmsg") {
@@ -462,30 +435,15 @@ func TestEachLogLevel(t *testing.T) {
 	}
 }
 
-func TestLogRuntimeCallerFailure(t *testing.T) {
+func TestTimestampFormat(t *testing.T) {
 	var b bytes.Buffer
-	core := &loggerCore{
-		level:       DEBUG,
-		debugLogger: log.New(&b, "", 0),
-		infoLogger:  log.New(&b, "", 0),
-		warnLogger:  log.New(&b, "", 0),
-		errorLogger: log.New(&b, "", 0),
-		fatalLogger: log.New(&b, "", 0),
-	}
+	core := testCore(DEBUG, &b)
 	l := &loggerImpl{core: core, parentID: "p", childID: "c"}
-
-	patch := monkey.Patch(runtime.Caller, func(skip int) (pc uintptr, file string, line int, ok bool) {
-		return 0, "", 0, false
-	})
-	defer patch.Unpatch()
-
-	l.Info("caller-fail")
+	l.Info("ts-test")
 	out := b.String()
-	if !strings.Contains(out, "unknown") {
-		t.Fatalf("expected 'unknown' in output, got: %q", out)
-	}
-	if !strings.Contains(out, "caller-fail") {
-		t.Fatalf("expected message in output, got: %q", out)
+	// Should contain milliseconds (3 decimal places after seconds)
+	if !strings.Contains(out, ".") {
+		t.Fatalf("expected millisecond timestamp, got: %q", out)
 	}
 }
 

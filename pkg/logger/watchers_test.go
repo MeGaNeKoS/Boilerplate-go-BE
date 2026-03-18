@@ -3,7 +3,7 @@ package logger
 import (
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -29,16 +29,18 @@ func newCoreWithFiles(t *testing.T, dir string) (*loggerCore, *os.File, *os.File
 		t.Fatalf("open level: %v", err)
 	}
 
+	mu := &sync.Mutex{}
 	core := &loggerCore{
 		logFile:       lf,
 		logFilePath:   logPath,
 		levelFile:     map[Level]*os.File{ERROR: ef},
 		levelFilePath: map[Level]string{ERROR: errPath},
-		debugLogger:   log.New(io.Discard, "", 0),
-		infoLogger:    log.New(io.Discard, "", 0),
-		warnLogger:    log.New(io.Discard, "", 0),
-		errorLogger:   log.New(io.Discard, "", 0),
-		fatalLogger:   log.New(io.Discard, "", 0),
+		handler: &pipeHandler{
+			mu:            mu,
+			level:         DEBUG.toSlog(),
+			defaultWriter: lf,
+			writers:       map[slog.Level]io.Writer{ERROR.toSlog(): io.MultiWriter(lf, ef)},
+		},
 	}
 	return core, lf, ef
 }

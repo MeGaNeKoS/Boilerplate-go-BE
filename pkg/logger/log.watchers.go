@@ -3,6 +3,7 @@ package logger
 import (
 	"io"
 	stdlog "log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -95,7 +96,7 @@ func (c *loggerCore) reopenFile(path string) {
 				}
 			}
 		}
-		c.rebuildLoggers()
+		c.rebuildHandler()
 		return
 	}
 	stdlog.Printf("logger: failed to reopen %s after %d retries", path, maxReopenRetries)
@@ -105,22 +106,14 @@ func openLogFile(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 }
 
-func (c *loggerCore) rebuildLoggers() {
-	levelWriters := make(map[Level]io.Writer)
+func (c *loggerCore) rebuildHandler() {
+	writers := make(map[slog.Level]io.Writer)
 	for lvl, lf := range c.levelFile {
 		if lf != nil {
-			levelWriters[lvl] = io.MultiWriter(c.logFile, lf)
+			writers[lvl.toSlog()] = io.MultiWriter(c.logFile, lf)
 		}
 	}
-	fallback := func(lvl Level) io.Writer {
-		if w, ok := levelWriters[lvl]; ok {
-			return w
-		}
-		return c.logFile
-	}
-	c.debugLogger.SetOutput(fallback(DEBUG))
-	c.infoLogger.SetOutput(fallback(INFO))
-	c.warnLogger.SetOutput(fallback(WARN))
-	c.errorLogger.SetOutput(fallback(ERROR))
-	c.fatalLogger.SetOutput(fallback(FATAL))
+	h, _ := c.handler.(*pipeHandler)
+	h.defaultWriter = c.logFile
+	h.writers = writers
 }

@@ -3,7 +3,7 @@ package logger
 import (
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -46,7 +46,7 @@ func initLoggerCore(logConfig config.LogConfig) (*loggerCore, error) {
 
 	levelFiles := make(map[Level]*os.File)
 	levelPaths := make(map[Level]string)
-	levelWriters := make(map[Level]io.Writer)
+	writers := make(map[slog.Level]io.Writer)
 
 	for strLevel, fileName := range logConfig.PerLevelFiles {
 		lvl := ParseLogLevel(strLevel)
@@ -64,14 +64,16 @@ func initLoggerCore(logConfig config.LogConfig) (*loggerCore, error) {
 		}
 		levelFiles[lvl] = f
 		levelPaths[lvl] = fullPath
-		levelWriters[lvl] = io.MultiWriter(defaultFile, f)
+		writers[lvl.toSlog()] = io.MultiWriter(defaultFile, f)
 	}
 
-	fallback := func(lvl Level) io.Writer {
-		if w, ok := levelWriters[lvl]; ok {
-			return w
-		}
-		return defaultFile
+	mu := &sync.Mutex{}
+	handler := &pipeHandler{
+		mu:            mu,
+		level:         level.toSlog(),
+		toStdout:      logConfig.AlsoLogToStdout,
+		writers:       writers,
+		defaultWriter: defaultFile,
 	}
 
 	core := &loggerCore{
@@ -82,11 +84,7 @@ func initLoggerCore(logConfig config.LogConfig) (*loggerCore, error) {
 		logFilePath:   defaultLogPath,
 		levelFile:     levelFiles,
 		levelFilePath: levelPaths,
-		debugLogger:   log.New(fallback(DEBUG), "", 0),
-		infoLogger:    log.New(fallback(INFO), "", 0),
-		warnLogger:    log.New(fallback(WARN), "", 0),
-		errorLogger:   log.New(fallback(ERROR), "", 0),
-		fatalLogger:   log.New(fallback(FATAL), "", 0),
+		handler:       handler,
 	}
 	core.startWatchers()
 	return core, nil

@@ -1,7 +1,7 @@
 package logger
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"sync"
 
@@ -10,6 +10,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// Level mirrors slog.Level but keeps the existing API.
 type Level int
 
 const (
@@ -20,6 +21,41 @@ const (
 	FATAL
 )
 
+// toSlog converts our Level to slog.Level.
+func (l Level) toSlog() slog.Level {
+	switch l {
+	case DEBUG:
+		return slog.LevelDebug
+	case INFO:
+		return slog.LevelInfo
+	case WARN:
+		return slog.LevelWarn
+	case ERROR:
+		return slog.LevelError
+	case FATAL:
+		return slog.LevelError + 4 // custom level above Error
+	default:
+		return slog.LevelInfo
+	}
+}
+
+// labelFromSlog returns the pipe-delimited label for the log line.
+func labelFromSlog(l slog.Level) string {
+	switch {
+	case l >= slog.LevelError+4:
+		return "FATAL"
+	case l >= slog.LevelError:
+		return "ERROR"
+	case l >= slog.LevelWarn:
+		return "WARN"
+	case l >= slog.LevelInfo:
+		return "INFO"
+	default:
+		return "DEBUG"
+	}
+}
+
+// Logger is the public interface used throughout the application.
 type Logger interface {
 	Debug(msg string)
 	DebugF(format string, args ...interface{})
@@ -45,15 +81,7 @@ type loggerCore struct {
 	levelFile     map[Level]*os.File
 	levelFilePath map[Level]string
 	watchers      []*fsnotify.Watcher
-
-	debugLogger *log.Logger
-	infoLogger  *log.Logger
-	warnLogger  *log.Logger
-	errorLogger *log.Logger
-	fatalLogger *log.Logger
-
-	parentID string // For request id tracing through entire request lifetime across all service
-	childID  string // For request id tracing through entire request lifetime in specific endpoint only
+	handler       slog.Handler
 }
 
 type loggerImpl struct {
