@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [controller-service-repo]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2
+
+  test:
+    name: Test (${{ matrix.tags || 'rest' }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - tags: ""
+          - tags: grpc
+          - tags: kafka
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: |
+          go test ${{ matrix.tags && format('-tags {0}', matrix.tags) }} -race -coverprofile=coverage.out ./...
+
+      - name: Check coverage
+        run: |
+          go tool cover -func=coverage.out | grep '^total:' | awk '{print $NF}'
