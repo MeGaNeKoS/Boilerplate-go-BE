@@ -26,7 +26,7 @@ func varName(file string, line int) string {
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	scanner := bufio.NewScanner(f)
 	for i := 1; scanner.Scan(); i++ {
 		if i == line {

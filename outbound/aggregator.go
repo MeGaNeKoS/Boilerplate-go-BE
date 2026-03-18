@@ -34,8 +34,9 @@ func (o *Outbound) Example() example.Service {
 	t := reflect.TypeOf((*example.Service)(nil)).Elem()
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if svc, ok := o.cache[t]; ok {
-		return svc.(example.Service)
+	if cached, ok := o.cache[t]; ok {
+		svc, _ := cached.(example.Service)
+		return svc
 	}
 	newSvc := example.NewService(o.log)
 	o.cache[t] = newSvc

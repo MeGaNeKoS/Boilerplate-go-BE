@@ -2,13 +2,17 @@ package middleware
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
-	humachi "github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/golang-jwt/jwt/v4"
 
+	"project-template/infrastructure/config"
 	"project-template/infrastructure/dto"
 	"project-template/infrastructure/dto/response"
 	"project-template/infrastructure/utils"
@@ -26,11 +30,35 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		realm := "example"
+		if config.Cfg != nil && config.Cfg.AppName != "" {
+			realm = config.Cfg.AppName
+		}
+
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if token == "" {
+			wwwAuth := fmt.Sprintf(`Bearer realm="%s"`, realm)
+			respond(w, utils.GenerateErrorResponse(code.ErrMissingToken).
+				WithHeader("WWW-Authenticate", wwwAuth).
+				WithInstance(r.URL.Path))
+			return
+		}
+
 		var user dto.JWTUser
 		if err := utils.GetJWTService().ParseJWT(token, &user); err != nil {
 			log.ErrorF("This token invalid because: %v", err)
-			respond(w, utils.GenerateErrorResponse(code.ErrTokenExpired))
+			var ve *jwt.ValidationError
+			if errors.As(err, &ve) && ve.Errors&jwt.ValidationErrorExpired != 0 {
+				wwwAuth := fmt.Sprintf(`Bearer realm="%s", error="invalid_token", error_description="The access token expired"`, realm)
+				respond(w, utils.GenerateErrorResponse(code.ErrTokenExpired).
+					WithHeader("WWW-Authenticate", wwwAuth).
+					WithInstance(r.URL.Path))
+			} else {
+				wwwAuth := fmt.Sprintf(`Bearer realm="%s", error="invalid_token", error_description="The token is invalid"`, realm)
+				respond(w, utils.GenerateErrorResponse(code.ErrInvalidToken).
+					WithHeader("WWW-Authenticate", wwwAuth).
+					WithInstance(r.URL.Path))
+			}
 			return
 		}
 
@@ -80,6 +108,9 @@ func respond(w http.ResponseWriter, resp *response.HttpResponse) {
 	ct := resp.ContentType
 	if ct == "" {
 		ct = "application/json"
+	}
+	for k, v := range resp.Headers {
+		w.Header().Set(k, v)
 	}
 	w.Header().Set("Content-Type", ct)
 	w.WriteHeader(resp.HTTPCode)

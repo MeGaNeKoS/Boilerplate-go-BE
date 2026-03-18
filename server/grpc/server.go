@@ -50,15 +50,25 @@ func (s *Server) buildService(ctx context.Context) (context.Context, services.Se
 	md, _ := metadata.FromIncomingContext(ctx)
 	parentID := getHeader(md, "parent-id")
 	if parentID == "" {
-		id, _ := utils.UniqueIdByTime(86400)
+		id, err := utils.UniqueIdByTime(86400)
+		if err != nil {
+			return ctx, nil, status.Errorf(codes.Internal, "failed to generate request ID: %v", err)
+		}
 		parentID = "-" + id
 	}
 	token := strings.TrimPrefix(getHeader(md, "authorization"), "Bearer ")
 
 	reqLog := utils.GetLoggerFromContext(ctx)
 	if reqLog == nil {
-		childId, _ := utils.UniqueIdByTime(86400)
-		reqLog, _ = logger.NewLogger(config.Cfg.LogTarget, parentID, childId)
+		childId, err := utils.UniqueIdByTime(86400)
+		if err != nil {
+			return ctx, nil, status.Errorf(codes.Internal, "failed to generate child ID: %v", err)
+		}
+		var logErr error
+		reqLog, logErr = logger.NewLogger(config.Cfg.LogTarget, parentID, childId)
+		if logErr != nil {
+			return ctx, nil, status.Errorf(codes.Internal, "failed to create logger: %v", logErr)
+		}
 	}
 
 	var user dto.JWTUser

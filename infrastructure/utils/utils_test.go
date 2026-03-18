@@ -8,7 +8,7 @@ import (
 
 type errorReader struct{}
 
-func (errorReader) Read(p []byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+func (errorReader) Read(_ []byte) (int, error) { return 0, io.ErrUnexpectedEOF }
 
 func TestUniqueIdByTime(t *testing.T) {
 	old := randReader

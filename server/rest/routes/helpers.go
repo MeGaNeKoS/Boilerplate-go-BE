@@ -8,6 +8,18 @@ import (
 
 const BearerScheme = "bearerAuth"
 
+// NewGroup wraps huma.NewGroup and applies a default tag based on the prefix.
+func NewGroup(parent *huma.Group, prefix string) *huma.Group {
+	var g *huma.Group
+	if prefix != "" {
+		g = huma.NewGroup(parent, prefix)
+	} else {
+		g = huma.NewGroup(parent)
+	}
+	UseDefaultTag(g, prefix)
+	return g
+}
+
 // UseDefaultTag sets a default tag for operations based on the group prefix.
 // If an operation already specifies tags, they are left unchanged.
 func UseDefaultTag(g *huma.Group, prefix string) {

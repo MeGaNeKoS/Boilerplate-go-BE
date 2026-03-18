@@ -23,10 +23,15 @@ type recLogger struct {
 	err  string
 }
 
+func (r *recLogger) Debug(string)                              {}
 func (r *recLogger) DebugF(string, ...interface{})             {}
+func (r *recLogger) Info(string)                               {}
 func (r *recLogger) InfoF(format string, args ...interface{})  { r.info = fmt.Sprintf(format, args...) }
+func (r *recLogger) Warn(string)                               {}
 func (r *recLogger) WarnF(string, ...interface{})              {}
+func (r *recLogger) Error(string)                              {}
 func (r *recLogger) ErrorF(format string, args ...interface{}) { r.err = fmt.Sprintf(format, args...) }
+func (r *recLogger) Fatal(string)                              {}
 func (r *recLogger) FatalF(string, ...interface{})             {}
 func (r *recLogger) ParentID() string                          { return "" }
 func (r *recLogger) ChildID() string                           { return "" }
@@ -51,7 +56,7 @@ func TestLoggingUnaryServerInterceptorError(t *testing.T) {
 	wantErr := status.Error(codes.NotFound, "missing")
 	handler := func(_ context.Context, req interface{}) (interface{}, error) { return nil, wantErr }
 	_, err := interceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: "Bar"}, handler)
-	if err != wantErr {
+	if !errors.Is(err, wantErr) {
 		t.Fatalf("unexpected error %v", err)
 	}
 	if !strings.Contains(lg.err, "missing") {

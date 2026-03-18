@@ -35,13 +35,13 @@ func initLoggerCore(logConfig config.LogConfig) (*loggerCore, error) {
 	level := ParseLogLevel(logConfig.VerboseLevel)
 
 	if err := os.MkdirAll(logConfig.Path, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create log directory: %v", err)
+		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
 
 	defaultLogPath := filepath.Join(logConfig.Path, logConfig.FileName)
 	defaultFile, err := os.OpenFile(defaultLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open default log file: %v", err)
+		return nil, fmt.Errorf("failed to open default log file: %w", err)
 	}
 
 	levelFiles := make(map[Level]*os.File)
@@ -60,7 +60,7 @@ func initLoggerCore(logConfig config.LogConfig) (*loggerCore, error) {
 			for _, lf := range levelFiles {
 				_ = lf.Close()
 			}
-			return nil, fmt.Errorf("failed to open %s log file: %v", strLevel, err)
+			return nil, fmt.Errorf("failed to open %s log file: %w", strLevel, err)
 		}
 		levelFiles[lvl] = f
 		levelPaths[lvl] = fullPath

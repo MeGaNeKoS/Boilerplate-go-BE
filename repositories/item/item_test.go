@@ -59,10 +59,15 @@ func (m mockDB) Ping() error  { return nil }
 
 type dummyLogger struct{}
 
+func (dummyLogger) Debug(string)                  {}
 func (dummyLogger) DebugF(string, ...interface{}) {}
+func (dummyLogger) Info(string)                    {}
 func (dummyLogger) InfoF(string, ...interface{})  {}
+func (dummyLogger) Warn(string)                    {}
 func (dummyLogger) WarnF(string, ...interface{})  {}
+func (dummyLogger) Error(string)                   {}
 func (dummyLogger) ErrorF(string, ...interface{}) {}
+func (dummyLogger) Fatal(string)                   {}
 func (dummyLogger) FatalF(string, ...interface{}) {}
 func (dummyLogger) ParentID() string              { return "" }
 func (dummyLogger) ChildID() string               { return "" }
@@ -122,7 +127,7 @@ func TestItemRepositoryGetNotFound(t *testing.T) {
 	repo, mock := newRepo(t)
 	mock.ExpectQuery("SELECT").WillReturnError(sql.ErrNoRows)
 	_, err := repo.Get(context.Background(), 1)
-	if err == nil || err != code.ErrItemNotFound {
+	if err == nil || !errors.Is(err, code.ErrItemNotFound) {
 		t.Fatalf("unexpected error %v", err)
 	}
 }
@@ -136,7 +141,10 @@ func TestItemRepositoryUpdateError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	mock.ExpectationsWereMet()
+	err = mock.ExpectationsWereMet()
+	if err != nil {
+		return
+	}
 }
 
 func TestItemRepositoryDelete(t *testing.T) {

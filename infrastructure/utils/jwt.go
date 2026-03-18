@@ -18,7 +18,7 @@ import (
 
 const LoginExpirationDuration = time.Hour * 24
 
-var randomReader io.Reader = rand.Reader
+var randomReader = rand.Reader
 
 // parseWithClaims is a wrapper around jwt.ParseWithClaims to allow overriding
 // it in tests.
@@ -67,22 +67,22 @@ func newJWTService(private, public bool) (*jwtService, error) {
 	if private {
 		privateKeyData, err := os.ReadFile(config.Cfg.Server.JWT.PrivateKey)
 		if err != nil {
-			return nil, fmt.Errorf("could not read private key: %v", err)
+			return nil, fmt.Errorf("could not read private key: %w", err)
 		}
 		service.privateKey, err = jwt.ParseRSAPrivateKeyFromPEM(privateKeyData)
 		if err != nil {
-			return nil, fmt.Errorf("could not parse private key: %v", err)
+			return nil, fmt.Errorf("could not parse private key: %w", err)
 		}
 	}
 
 	if public {
 		publicKeyData, err := os.ReadFile(config.Cfg.Server.JWT.PublicKey)
 		if err != nil {
-			return nil, fmt.Errorf("could not read public key: %v", err)
+			return nil, fmt.Errorf("could not read public key: %w", err)
 		}
 		service.publicKey, err = jwt.ParseRSAPublicKeyFromPEM(publicKeyData)
 		if err != nil {
-			return nil, fmt.Errorf("could not parse public key: %v", err)
+			return nil, fmt.Errorf("could not parse public key: %w", err)
 		}
 	}
 
@@ -172,19 +172,22 @@ func (s *jwtService) ParseJWT(tokenString string, claims jwt.Claims) error {
 		return fmt.Errorf("invalid token")
 	}
 
-	val := reflect.ValueOf(claims).Elem()
-
-	envField := val.FieldByName("Environment")
-	if !envField.IsValid() {
-		return fmt.Errorf("environment field is missing")
+	type environmentClaims interface {
+		GetEnvironment() string
 	}
-
-	if envField.Kind() != reflect.String {
-		return fmt.Errorf("environment field is not a string")
-	}
-
-	if envField.String() != config.Cfg.Server.Environment {
-		return fmt.Errorf("invalid environment")
+	if ec, ok := claims.(environmentClaims); ok {
+		if ec.GetEnvironment() != config.Cfg.Server.Environment {
+			return fmt.Errorf("invalid environment: got %q, want %q", ec.GetEnvironment(), config.Cfg.Server.Environment)
+		}
+	} else {
+		val := reflect.ValueOf(claims).Elem()
+		envField := val.FieldByName("Environment")
+		if !envField.IsValid() || envField.Kind() != reflect.String {
+			return fmt.Errorf("claims type %T has no string Environment field", claims)
+		}
+		if envField.String() != config.Cfg.Server.Environment {
+			return fmt.Errorf("invalid environment: got %q, want %q", envField.String(), config.Cfg.Server.Environment)
+		}
 	}
 
 	return nil

@@ -27,8 +27,8 @@ func TestRunSuccess(t *testing.T) {
 	st := &stubListen{}
 	patchListen := monkey.Patch(connection.Listen, st.call)
 	defer patchListen.Unpatch()
-	os.Setenv("SUPERVISOR_SOCKET", "sock")
-	defer os.Unsetenv("SUPERVISOR_SOCKET")
+	_ = os.Setenv("SUPERVISOR_SOCKET", "sock")
+	defer func() { _ = os.Unsetenv("SUPERVISOR_SOCKET") }()
 	if err := run(); err != nil {
 		t.Fatalf("run error: %v", err)
 	}
@@ -41,8 +41,8 @@ func TestRunError(t *testing.T) {
 	st := &stubListen{err: errors.New("fail")}
 	patchListen := monkey.Patch(connection.Listen, st.call)
 	defer patchListen.Unpatch()
-	os.Setenv("SUPERVISOR_SOCKET", "bad")
-	defer os.Unsetenv("SUPERVISOR_SOCKET")
+	_ = os.Setenv("SUPERVISOR_SOCKET", "bad")
+	defer func() { _ = os.Unsetenv("SUPERVISOR_SOCKET") }()
 	if err := run(); err == nil {
 		t.Fatalf("expected error")
 	}

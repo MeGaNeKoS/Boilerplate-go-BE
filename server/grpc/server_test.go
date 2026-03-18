@@ -52,10 +52,15 @@ func TestNewServerRegistersService(t *testing.T) {
 // --- stubs and helpers ---
 type stubLogger struct{}
 
+func (stubLogger) Debug(string)                  {}
 func (stubLogger) DebugF(string, ...interface{}) {}
+func (stubLogger) Info(string)                    {}
 func (stubLogger) InfoF(string, ...interface{})  {}
+func (stubLogger) Warn(string)                    {}
 func (stubLogger) WarnF(string, ...interface{})  {}
+func (stubLogger) Error(string)                   {}
 func (stubLogger) ErrorF(string, ...interface{}) {}
+func (stubLogger) Fatal(string)                   {}
 func (stubLogger) FatalF(string, ...interface{}) {}
 func (stubLogger) ParentID() string              { return "" }
 func (stubLogger) ChildID() string               { return "" }
@@ -90,67 +95,19 @@ type stubExampleOutbound struct{}
 func (stubExampleOutbound) FetchItemByID(_ context.Context, id int) (models.Item, error) {
 	return models.Item{ID: id}, nil
 }
-func (stubExampleOutbound) FetchItemByFilter(_ context.Context, filter string) ([]models.Item, error) {
+func (stubExampleOutbound) FetchItemByFilter(_ context.Context, _ string) ([]models.Item, error) {
 	return nil, nil
 }
 
 type stubExampleAgg struct{}
 
-func (stubExampleAgg) HTTP() example.ExampleOutbound       { return stubExampleOutbound{} }
-func (stubExampleAgg) GRPC() example.ExampleGRPCOutbound   { return nil }
-func (stubExampleAgg) Kafka() example.ExampleKafkaOutbound { return nil }
+func (stubExampleAgg) HTTP() example.Outbound       { return stubExampleOutbound{} }
+func (stubExampleAgg) GRPC() example.GrpcOutbound   { return nil }
+func (stubExampleAgg) Kafka() example.KafkaOutbound { return nil }
 
 type stubOutbound struct{}
 
 func (stubOutbound) Example() example.Service { return stubExampleAgg{} }
-
-type stubService struct{}
-
-func (stubService) CreateItem(_ context.Context, item models.Item) (models.Item, *code.Code) {
-	return item, nil
-}
-func (stubService) ListItems(_ context.Context) ([]models.Item, *code.Code) { return nil, nil }
-func (stubService) GetItem(_ context.Context, id int) (models.Item, *code.Code) {
-	return models.Item{}, nil
-}
-func (stubService) UpdateItem(_ context.Context, item models.Item) (models.Item, *code.Code) {
-	return models.Item{}, nil
-}
-func (stubService) DeleteItem(_ context.Context, id int) *code.Code { return nil }
-
-type stubService2 struct{}
-
-func (stubService2) CreateItem(_ context.Context, item models.Item) (models.Item, *code.Code) {
-	return item, nil
-}
-func (stubService2) ListItems(_ context.Context) ([]models.Item, *code.Code) {
-	return []models.Item{{ID: 1, Name: "a"}}, nil
-}
-func (stubService2) GetItem(_ context.Context, id int) (models.Item, *code.Code) {
-	return models.Item{ID: id, Name: "b"}, nil
-}
-func (stubService2) UpdateItem(_ context.Context, item models.Item) (models.Item, *code.Code) {
-	return item, nil
-}
-func (stubService2) DeleteItem(_ context.Context, id int) *code.Code { return nil }
-
-type stubServiceErr struct{}
-
-func (stubServiceErr) CreateItem(_ context.Context, item models.Item) (models.Item, *code.Code) {
-	return models.Item{}, code.ErrInternalServerError
-}
-func (stubServiceErr) ListItems(_ context.Context) ([]models.Item, *code.Code) {
-	return nil, code.ErrInternalServerError
-}
-func (stubServiceErr) GetItem(_ context.Context, id int) (models.Item, *code.Code) {
-	return models.Item{}, code.ErrItemNotFound
-}
-func (stubServiceErr) UpdateItem(_ context.Context, item models.Item) (models.Item, *code.Code) {
-	return models.Item{}, code.ErrInternalServerError
-}
-func (stubServiceErr) DeleteItem(_ context.Context, id int) *code.Code {
-	return code.ErrInternalServerError
-}
 
 func writeKeyFiles(t *testing.T, dir string) (string, string) {
 	t.Helper()
@@ -368,5 +325,67 @@ func TestCreateItemLoggerGenerated(t *testing.T) {
 	}
 	if gotP != "-pid" || gotC != "cid" {
 		t.Fatalf("logger not created with expected ids: %s %s", gotP, gotC)
+	}
+}
+
+func TestBuildServiceParentIDGenerationError(t *testing.T) {
+	defer monkey.UnpatchAll()
+
+	monkey.Patch(utils.UniqueIdByTime, func(uint64) (string, error) {
+		return "", errors.New("rand fail")
+	})
+
+	srv := &Server{log: stubLogger{}}
+	// No parent-id in metadata, no logger in context
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD{})
+	_, _, err := srv.buildService(ctx)
+	st, _ := status.FromError(err)
+	if st.Code() != codes.Internal {
+		t.Fatalf("expected Internal got %v", st.Code())
+	}
+}
+
+func TestBuildServiceChildIDGenerationError(t *testing.T) {
+	defer monkey.UnpatchAll()
+
+	callCount := 0
+	monkey.Patch(utils.UniqueIdByTime, func(uint64) (string, error) {
+		callCount++
+		if callCount == 1 {
+			return "pid", nil
+		}
+		return "", errors.New("child fail")
+	})
+
+	srv := &Server{log: stubLogger{}}
+	// No parent-id in metadata, no logger in context
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD{})
+	_, _, err := srv.buildService(ctx)
+	st, _ := status.FromError(err)
+	if st.Code() != codes.Internal {
+		t.Fatalf("expected Internal got %v", st.Code())
+	}
+}
+
+func TestBuildServiceLoggerCreationError(t *testing.T) {
+	defer monkey.UnpatchAll()
+
+	monkey.Patch(utils.UniqueIdByTime, func(uint64) (string, error) {
+		return "id", nil
+	})
+	monkey.Patch(logger.NewLogger, func(config.LogConfig, string, string) (logger.Logger, error) {
+		return nil, errors.New("logger fail")
+	})
+
+	dir := t.TempDir()
+	config.Cfg = &config.Config{AppName: "APP", LogTarget: config.LogConfig{Path: dir, FileName: "app.log"}}
+
+	srv := &Server{log: stubLogger{}}
+	// No parent-id in metadata, no logger in context
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD{})
+	_, _, err := srv.buildService(ctx)
+	st, _ := status.FromError(err)
+	if st.Code() != codes.Internal {
+		t.Fatalf("expected Internal got %v", st.Code())
 	}
 }

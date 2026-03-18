@@ -22,9 +22,9 @@ import (
 // method.
 //
 //go:linkname defineErrors github.com/danielgtaylor/huma/v2.defineErrors
-func defineErrors(op *huma.Operation, registry huma.Registry)
+func defineErrors(_ *huma.Operation, _ huma.Registry)
 
-func noopDefineErrors(op *huma.Operation, registry huma.Registry) {
+func noopDefineErrors(_ *huma.Operation, _ huma.Registry) {
 }
 
 func init() {

@@ -57,7 +57,7 @@ func TestCreateItemIntegrationDBError(t *testing.T) {
 	mock.ExpectExec("INSERT").WillReturnError(sql.ErrConnDone)
 	mock.ExpectRollback()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/items", bytes.NewBufferString(`{"id":0,"name":"foo"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/items", bytes.NewBufferString(`{"id":0,"name":"sample"}`))
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -98,7 +98,7 @@ func TestUpdateItemIntegrationRepoError(t *testing.T) {
 	mock.ExpectExec("UPDATE").WillReturnError(sql.ErrConnDone)
 	mock.ExpectRollback()
 
-	req := httptest.NewRequest(http.MethodPut, "/api/items/4", bytes.NewBufferString(`{"id":4,"name":"baz"}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/items/4", bytes.NewBufferString(`{"id":4,"name":"sample"}`))
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -150,7 +150,7 @@ func TestListItemsIntegrationUnauthorized(t *testing.T) {
 func TestCreateItemIntegrationUnauthorized(t *testing.T) {
 	httpSrv, _, _ := setupServer(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/items", bytes.NewBufferString(`{"id":0,"name":"x"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/items", bytes.NewBufferString(`{"id":0,"name":"sample"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -177,7 +177,7 @@ func TestGetItemIntegrationUnauthorized(t *testing.T) {
 func TestUpdateItemIntegrationUnauthorized(t *testing.T) {
 	httpSrv, _, _ := setupServer(t)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/items/1", bytes.NewBufferString(`{"id":1,"name":"x"}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/items/1", bytes.NewBufferString(`{"id":1,"name":"sample"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -391,7 +391,7 @@ func TestUpdateItemIntegrationNotFound(t *testing.T) {
 	})
 	defer patchRepo.Unpatch()
 
-	req := httptest.NewRequest(http.MethodPut, "/api/items/4", bytes.NewBufferString(`{"id":4,"name":"baz"}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/items/4", bytes.NewBufferString(`{"id":4,"name":"example"}`))
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

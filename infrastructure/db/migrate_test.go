@@ -7,16 +7,17 @@ import (
 	"reflect"
 	"testing"
 
+	"project-template/infrastructure/config"
+	"project-template/infrastructure/enums"
+	"project-template/pkg/logger"
+	"strings"
+
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/bouk/monkey"
 	"github.com/doug-martin/goqu/v9"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database"
 	mysqlmigrate "github.com/golang-migrate/migrate/v4/database/mysql"
-	"project-template/infrastructure/config"
-	"project-template/infrastructure/enums"
-	"project-template/pkg/logger"
-	"strings"
 )
 
 func TestRunMigrationsSuccess(t *testing.T) {
@@ -115,6 +116,44 @@ func TestRunMigrationsErrors(t *testing.T) {
 	patchUp.Unpatch()
 	patchNew.Unpatch()
 
+	// dirty db skip strategy: force but no rollback
+	cnt = 0
+	forced = 0
+	stepsCalled := false
+	config.Cfg.Database.DirtyStrategy = enums.DirtyStrategySkip
+	patchNew = monkey.Patch(migrate.NewWithDatabaseInstance, func(string, string, database.Driver) (*migrate.Migrate, error) {
+		return &migrate.Migrate{}, nil
+	})
+	patchUp = monkey.PatchInstanceMethod(reflect.TypeOf(&migrate.Migrate{}), "Up", func(*migrate.Migrate) error {
+		if cnt == 0 {
+			cnt++
+			return migrate.ErrDirty{Version: 2}
+		}
+		return nil
+	})
+	patchForce = monkey.PatchInstanceMethod(reflect.TypeOf(&migrate.Migrate{}), "Force", func(_ *migrate.Migrate, v int) error {
+		forced = v
+		return nil
+	})
+	patchSteps = monkey.PatchInstanceMethod(reflect.TypeOf(&migrate.Migrate{}), "Steps", func(_ *migrate.Migrate, _ int) error {
+		stepsCalled = true
+		return nil
+	})
+	if err := RunMigrations("file://migrations"); err != nil {
+		t.Fatalf("skip strategy: unexpected %v", err)
+	}
+	if forced != 2 {
+		t.Fatalf("expected force 2, got %d", forced)
+	}
+	if stepsCalled {
+		t.Fatal("skip strategy should not call Steps")
+	}
+	patchSteps.Unpatch()
+	patchForce.Unpatch()
+	patchUp.Unpatch()
+	patchNew.Unpatch()
+	config.Cfg.Database.DirtyStrategy = enums.DirtyStrategyRetry
+
 	// err no change
 	patchNew = monkey.Patch(migrate.NewWithDatabaseInstance, func(string, string, database.Driver) (*migrate.Migrate, error) {
 		return &migrate.Migrate{}, nil
@@ -139,9 +178,9 @@ func (t testDB) GetGoquDialect() goqu.DialectWrapper { return goqu.Dialect("mysq
 func (t testDB) ExecContext(ctx context.Context, q string, args ...interface{}) (sql.Result, error) {
 	return t.DB.ExecContext(ctx, q, args...)
 }
-func (t testDB) WithTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
+func (t testDB) WithTransaction(_ context.Context, _ func(ctx context.Context) error) error {
 	return nil
 }
-func (t testDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) { return nil, nil }
-func (t testDB) Close() error                                                      { return nil }
-func (t testDB) Ping() error                                                       { return nil }
+func (t testDB) BeginTx(_ context.Context, _ *sql.TxOptions) (*sql.Tx, error) { return nil, nil }
+func (t testDB) Close() error                                                 { return nil }
+func (t testDB) Ping() error                                                  { return nil }

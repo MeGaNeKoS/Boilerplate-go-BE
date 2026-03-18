@@ -33,8 +33,8 @@ type HTTPOutbound struct {
 
 // Copy returns a deep copy of the HTTPOutbound struct, so changes won't affect the original.
 func (o *HTTPOutbound) Copy() *HTTPOutbound {
-	copied := deepcopy.Copy(o)
-	return copied.(*HTTPOutbound)
+	copied, _ := deepcopy.Copy(o).(*HTTPOutbound)
+	return copied
 }
 
 // WithPath sets the request path.
@@ -119,8 +119,8 @@ func (o *HTTPOutbound) SendHTTPRequest(log logger.Logger) (response.HttpResponse
 		return emptyResponse(), code.ErrFireExternalRequestFailed
 	}
 	defer func(Body io.ReadCloser) {
-		if err := Body.Close(); err != nil {
-			log.WarnF("Failed to close response body: %v", err)
+		if cerr := Body.Close(); cerr != nil {
+			log.WarnF("Failed to close response body: %v", cerr)
 		}
 	}(httpResp.Body)
 
@@ -185,7 +185,10 @@ func handleResponse(resp *http.Response, responseContainer interface{}, log logg
 		return response.HttpResponse{}, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	dump, _ := httputil.DumpResponse(resp, true)
+	dump, dumpErr := httputil.DumpResponse(resp, true)
+	if dumpErr != nil {
+		log.WarnF("Failed to dump response: %v", dumpErr)
+	}
 
 	if errMarshal := json.Unmarshal(bodyBytes, responseContainer); errMarshal != nil {
 		log.ErrorF("Failed to unmarshal into %T: %v\nDump: %s", responseContainer, errMarshal, dump)

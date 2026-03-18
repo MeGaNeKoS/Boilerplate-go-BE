@@ -20,7 +20,7 @@ type exampleOutbound struct {
 }
 
 // NewExampleOutbound creates a new outbound client for the Example service.
-func NewExampleOutbound(logger logger.Logger) ExampleOutbound {
+func NewExampleOutbound(logger logger.Logger) Outbound {
 	return &exampleOutbound{
 		log: logger,
 	}

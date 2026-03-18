@@ -10,30 +10,30 @@ import (
 	"project-template/pkg/logger"
 )
 
-// ExampleOutbound defines calls to the Example external service.
-type ExampleOutbound interface {
+// Outbound defines calls to the Example external service.
+type Outbound interface {
 	// FetchItemByID retrieves a single item by ID.
 	FetchItemByID(ctx context.Context, id int) (models.Item, error)
 	// FetchItemByFilter retrieves a list of items that match the given filter.
 	FetchItemByFilter(ctx context.Context, filter string) ([]models.Item, error)
 }
 
-// ExampleGRPCOutbound defines gRPC calls to the Example service.
-type ExampleGRPCOutbound interface {
+// GrpcOutbound defines gRPC calls to the Example service.
+type GrpcOutbound interface {
 	GetItem(ctx context.Context, id int) (*pb.Item, error)
 }
 
-// ExampleKafkaOutbound defines producing messages to Kafka.
-type ExampleKafkaOutbound interface {
+// KafkaOutbound defines producing messages to Kafka.
+type KafkaOutbound interface {
 	PublishItem(ctx context.Context, item models.Item) error
 	PublishItemAndWait(ctx context.Context, item models.Item) (models.Item, error)
 }
 
 // Service aggregates outbound transports for the Example service.
 type Service interface {
-	HTTP() ExampleOutbound
-	GRPC() ExampleGRPCOutbound
-	Kafka() ExampleKafkaOutbound
+	HTTP() Outbound
+	GRPC() GrpcOutbound
+	Kafka() KafkaOutbound
 }
 
 type serviceAggregator struct {
@@ -50,38 +50,31 @@ func NewService(log logger.Logger) Service {
 	}
 }
 
-func (s *serviceAggregator) HTTP() ExampleOutbound {
-	t := reflect.TypeOf((*ExampleOutbound)(nil)).Elem()
+func (s *serviceAggregator) getOrCreate(key reflect.Type, create func() interface{}) interface{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if svc, ok := s.cache[t]; ok {
-		return svc.(ExampleOutbound)
+	if svc, ok := s.cache[key]; ok {
+		return svc
 	}
-	newSvc := NewExampleOutbound(s.log)
-	s.cache[t] = newSvc
+	newSvc := create()
+	s.cache[key] = newSvc
 	return newSvc
 }
 
-func (s *serviceAggregator) GRPC() ExampleGRPCOutbound {
-	t := reflect.TypeOf((*ExampleGRPCOutbound)(nil)).Elem()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if svc, ok := s.cache[t]; ok {
-		return svc.(ExampleGRPCOutbound)
-	}
-	newSvc := NewExampleGRPCOutbound(s.log)
-	s.cache[t] = newSvc
-	return newSvc
+func (s *serviceAggregator) HTTP() Outbound {
+	t := reflect.TypeOf((*Outbound)(nil)).Elem()
+	svc, _ := s.getOrCreate(t, func() interface{} { return NewExampleOutbound(s.log) }).(Outbound)
+	return svc
 }
 
-func (s *serviceAggregator) Kafka() ExampleKafkaOutbound {
-	t := reflect.TypeOf((*ExampleKafkaOutbound)(nil)).Elem()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if svc, ok := s.cache[t]; ok {
-		return svc.(ExampleKafkaOutbound)
-	}
-	newSvc := NewExampleKafkaOutbound(s.log)
-	s.cache[t] = newSvc
-	return newSvc
+func (s *serviceAggregator) GRPC() GrpcOutbound {
+	t := reflect.TypeOf((*GrpcOutbound)(nil)).Elem()
+	svc, _ := s.getOrCreate(t, func() interface{} { return NewExampleGRPCOutbound(s.log) }).(GrpcOutbound)
+	return svc
+}
+
+func (s *serviceAggregator) Kafka() KafkaOutbound {
+	t := reflect.TypeOf((*KafkaOutbound)(nil)).Elem()
+	svc, _ := s.getOrCreate(t, func() interface{} { return NewExampleKafkaOutbound(s.log) }).(KafkaOutbound)
+	return svc
 }

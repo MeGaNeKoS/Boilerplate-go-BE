@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -10,60 +9,48 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/bouk/monkey"
+	"github.com/golang-jwt/jwt/v4"
 
 	"project-template/infrastructure/config"
 	"project-template/infrastructure/db"
-	models "project-template/infrastructure/dto/item"
 	"project-template/infrastructure/dto/response"
 	"project-template/infrastructure/utils"
 	"project-template/outbound"
 	"project-template/outbound/service/example"
 	"project-template/pkg/logger"
 	repo "project-template/repositories"
-	repoitem "project-template/repositories/item"
 )
 
 type apiStubLogger struct{}
 
+func (apiStubLogger) Debug(string)                  {}
 func (apiStubLogger) DebugF(string, ...interface{}) {}
+func (apiStubLogger) Info(string)                   {}
 func (apiStubLogger) InfoF(string, ...interface{})  {}
+func (apiStubLogger) Warn(string)                   {}
 func (apiStubLogger) WarnF(string, ...interface{})  {}
+func (apiStubLogger) Error(string)                  {}
 func (apiStubLogger) ErrorF(string, ...interface{}) {}
+func (apiStubLogger) Fatal(string)                  {}
 func (apiStubLogger) FatalF(string, ...interface{}) {}
 func (apiStubLogger) ParentID() string              { return "p" }
 func (apiStubLogger) ChildID() string               { return "c" }
 func (apiStubLogger) CloseLogFile()                 {}
 
-type stubRepo struct{}
-
-func (stubRepo) GetItemRepository() repoitem.Repository { return nil }
-
 type stubExampleAgg struct{}
 
-func (stubExampleAgg) HTTP() example.ExampleOutbound       { return nil }
-func (stubExampleAgg) GRPC() example.ExampleGRPCOutbound   { return nil }
-func (stubExampleAgg) Kafka() example.ExampleKafkaOutbound { return nil }
+func (stubExampleAgg) HTTP() example.Outbound       { return nil }
+func (stubExampleAgg) GRPC() example.GrpcOutbound   { return nil }
+func (stubExampleAgg) Kafka() example.KafkaOutbound { return nil }
 
 type stubOutbound struct{}
 
 func (stubOutbound) Example() example.Service { return stubExampleAgg{} }
-
-type stubService struct{}
-
-func (stubService) CreateItem(context.Context, models.Item) (models.Item, error) {
-	return models.Item{}, nil
-}
-func (stubService) ListItems(context.Context) ([]models.Item, error) { return nil, nil }
-func (stubService) GetItem(context.Context, int) (models.Item, error) {
-	return models.Item{}, nil
-}
-func (stubService) UpdateItem(context.Context, models.Item) (models.Item, error) {
-	return models.Item{}, nil
-}
-func (stubService) DeleteItem(context.Context, int) error { return nil }
 
 func writeKeyFiles(t *testing.T, dir string) (string, string) {
 	t.Helper()
@@ -89,6 +76,39 @@ func writeKeyFiles(t *testing.T, dir string) (string, string) {
 	return privPath, pubPath
 }
 
+// testJWTService implements utils.JWTService for testing with real RSA keys.
+type testJWTService struct {
+	publicKey *rsa.PublicKey
+}
+
+func (s *testJWTService) SignJWT(map[string]interface{}) (string, error) { return "", nil }
+func (s *testJWTService) GenerateRefreshToken(int) (string, error)       { return "", nil }
+func (s *testJWTService) ParseJWT(tokenString string, claims jwt.Claims) error {
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		return s.publicKey, nil
+	})
+	if err != nil {
+		return err
+	}
+	if !token.Valid {
+		return &jwt.ValidationError{Errors: jwt.ValidationErrorClaimsInvalid}
+	}
+	return nil
+}
+
+func createTestJWTService(t *testing.T, privPath, pubPath string) utils.JWTService {
+	t.Helper()
+	pubData, err := os.ReadFile(pubPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubKey, err := jwt.ParseRSAPublicKeyFromPEM(pubData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &testJWTService{publicKey: pubKey}
+}
+
 // Test ServiceMiddleware building handler and AuthMiddleware parsing token.
 func TestMiddlewares(t *testing.T) {
 	defer monkey.UnpatchAll()
@@ -107,8 +127,8 @@ func TestMiddlewares(t *testing.T) {
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		if repo := utils.GetRepoCtx(r.Context()); repo == nil {
-			t.Fatal("repo missing")
+		if repoCtx := utils.GetRepoCtx(r.Context()); repoCtx == nil {
+			t.Fatal("repoCtx missing")
 		}
 		if out := utils.GetOutboundCtx(r.Context()); out == nil {
 			t.Fatal("outbound missing")
@@ -134,18 +154,128 @@ func TestMiddlewares(t *testing.T) {
 }
 
 func TestAuthMiddlewareInvalidToken(t *testing.T) {
+	config.Cfg = &config.Config{AppName: "APP"}
+
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next should not be called")
 	})
 	mw := AuthMiddleware(next)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/secure", nil)
 	req = req.WithContext(utils.SetLoggerToContext(req.Context(), apiStubLogger{}))
-	req.Header.Set("Authorization", "bad")
+	req.Header.Set("Authorization", "Bearer badtoken")
 	rec := httptest.NewRecorder()
 	mw.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("want 401 got %d", rec.Code)
+	}
+	wwwAuth := rec.Header().Get("WWW-Authenticate")
+	if wwwAuth == "" {
+		t.Fatal("missing WWW-Authenticate header")
+	}
+	if !strings.Contains(wwwAuth, `realm="APP"`) {
+		t.Fatalf("WWW-Authenticate missing realm: %s", wwwAuth)
+	}
+	if !strings.Contains(wwwAuth, `error="invalid_token"`) {
+		t.Fatalf("WWW-Authenticate missing error: %s", wwwAuth)
+	}
+}
+
+func TestAuthMiddlewareMissingToken(t *testing.T) {
+	config.Cfg = &config.Config{AppName: "APP"}
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next should not be called")
+	})
+	mw := AuthMiddleware(next)
+
+	req := httptest.NewRequest(http.MethodGet, "/secure", nil)
+	req = req.WithContext(utils.SetLoggerToContext(req.Context(), apiStubLogger{}))
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401 got %d", rec.Code)
+	}
+	wwwAuth := rec.Header().Get("WWW-Authenticate")
+	if wwwAuth == "" {
+		t.Fatal("missing WWW-Authenticate header")
+	}
+	if !strings.Contains(wwwAuth, `realm="APP"`) {
+		t.Fatalf("WWW-Authenticate missing realm: %s", wwwAuth)
+	}
+	// Missing token should not include error parameter
+	if strings.Contains(wwwAuth, `error=`) {
+		t.Fatalf("WWW-Authenticate should not have error for missing token: %s", wwwAuth)
+	}
+}
+
+func TestAuthMiddlewareEmptyBearer(t *testing.T) {
+	config.Cfg = &config.Config{AppName: "APP"}
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next should not be called")
+	})
+	mw := AuthMiddleware(next)
+
+	req := httptest.NewRequest(http.MethodGet, "/secure", nil)
+	req = req.WithContext(utils.SetLoggerToContext(req.Context(), apiStubLogger{}))
+	req.Header.Set("Authorization", "Bearer ")
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401 got %d", rec.Code)
+	}
+	wwwAuth := rec.Header().Get("WWW-Authenticate")
+	if wwwAuth == "" {
+		t.Fatal("missing WWW-Authenticate header")
+	}
+}
+
+func TestAuthMiddlewareExpiredToken(t *testing.T) {
+	defer monkey.UnpatchAll()
+
+	dir := t.TempDir()
+	priv, pub := writeKeyFiles(t, dir)
+	config.Cfg = &config.Config{AppName: "APP", Server: config.ServerConfig{Environment: "dev", JWT: config.JWTConfig{PrivateKey: priv, PublicKey: pub}}, LogTarget: config.LogConfig{Path: dir, FileName: "app.log"}}
+
+	privKeyData, _ := os.ReadFile(priv)
+	privateKey, _ := jwt.ParseRSAPrivateKeyFromPEM(privKeyData)
+
+	// Create an expired token
+	claims := jwt.MapClaims{
+		"exp":         time.Now().Add(-time.Hour).Unix(),
+		"iss":         "APP",
+		"environment": "dev",
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	tokenStr, err := tok.SignedString(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Patch GetJWTService to use our keys
+	svc := createTestJWTService(t, priv, pub)
+	monkey.Patch(utils.GetJWTService, func() utils.JWTService { return svc })
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next should not be called")
+	})
+	mw := AuthMiddleware(next)
+
+	req := httptest.NewRequest(http.MethodGet, "/secure", nil)
+	req = req.WithContext(utils.SetLoggerToContext(req.Context(), apiStubLogger{}))
+	req.Header.Set("Authorization", "Bearer "+tokenStr)
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401 got %d", rec.Code)
+	}
+	wwwAuth := rec.Header().Get("WWW-Authenticate")
+	if !strings.Contains(wwwAuth, `error="invalid_token"`) {
+		t.Fatalf("WWW-Authenticate missing error: %s", wwwAuth)
+	}
+	if !strings.Contains(wwwAuth, "expired") {
+		t.Fatalf("WWW-Authenticate missing expired description: %s", wwwAuth)
 	}
 }
 

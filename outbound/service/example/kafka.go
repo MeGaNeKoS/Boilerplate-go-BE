@@ -38,7 +38,7 @@ var newKafkaReader = func(cfg kafka.ReaderConfig) kafkaReader {
 }
 
 // NewExampleKafkaOutbound builds a Kafka writer for the Example service.
-func NewExampleKafkaOutbound(logger logger.Logger) ExampleKafkaOutbound {
+func NewExampleKafkaOutbound(logger logger.Logger) KafkaOutbound {
 	writer := newKafkaWriter(config.Cfg.Kafka.Brokers, config.Cfg.Kafka.Topic)
 	return &exampleKafkaOutbound{writer: writer, log: logger}
 }
@@ -54,7 +54,7 @@ func (e *exampleKafkaOutbound) PublishItem(ctx context.Context, item models.Item
 		Value: data,
 		Headers: []kafka.Header{
 			{Key: "parent-id", Value: []byte(e.log.ParentID())},
-			{Key: "authorization", Value: []byte(string(tok))},
+			{Key: "authorization", Value: []byte(tok)},
 		},
 	}
 	return e.writer.WriteMessages(ctx, msg)
@@ -65,7 +65,10 @@ func (e *exampleKafkaOutbound) PublishItemAndWait(ctx context.Context, item mode
 	if err != nil {
 		return models.Item{}, err
 	}
-	corrID, _ := utils.UniqueIdByTime(64)
+	corrID, err := utils.UniqueIdByTime(64)
+	if err != nil {
+		return models.Item{}, fmt.Errorf("failed to generate correlation ID: %w", err)
+	}
 	replyTopic := fmt.Sprintf("items-reply-%s", corrID)
 
 	tok, _ := utils.GetTokenCtx(ctx)
@@ -74,7 +77,7 @@ func (e *exampleKafkaOutbound) PublishItemAndWait(ctx context.Context, item mode
 		Value: data,
 		Headers: []kafka.Header{
 			{Key: "parent-id", Value: []byte(e.log.ParentID())},
-			{Key: "authorization", Value: []byte(string(tok))},
+			{Key: "authorization", Value: []byte(tok)},
 			{Key: "correlation-id", Value: []byte(corrID)},
 			{Key: "reply-to", Value: []byte(replyTopic)},
 		},
@@ -88,7 +91,11 @@ func (e *exampleKafkaOutbound) PublishItemAndWait(ctx context.Context, item mode
 		Topic:   replyTopic,
 		GroupID: "example-client",
 	})
-	defer reader.Close()
+	defer func(reader kafkaReader) {
+		if cerr := reader.Close(); cerr != nil {
+			e.log.ErrorF("failed to close Kafka reader: %v", cerr)
+		}
+	}(reader)
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(config.Cfg.Server.Timeout.Server)*time.Second)
 	defer cancel()

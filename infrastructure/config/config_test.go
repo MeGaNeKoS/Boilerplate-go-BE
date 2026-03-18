@@ -25,7 +25,7 @@ func TestLoadConfigSuccess(t *testing.T) {
 Version: "2"
 ExternalService:
   Example:
-    Host: http://example.com
+    Host: https://example.com
 Server:
   Host: 0.0.0.0
   Port: "80"

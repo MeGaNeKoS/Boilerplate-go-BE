@@ -1,8 +1,10 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -46,6 +48,7 @@ type ServerConfig struct {
 	Duration      int            `yaml:"Duration"`
 	Endpoint      EndpointConfig `yaml:"Endpoint"`
 	JWT           JWTConfig      `yaml:"JWT"`
+	InternalCIDRs []string       `yaml:"InternalCIDRs"`
 }
 
 // ListenerConfig holds host and port details for a network listener.
@@ -95,11 +98,24 @@ type LogConfig struct {
 }
 
 type OpenAPIConfig struct {
-	Version string     `yaml:"Version"`
-	Docs    DocsConfig `yaml:"Docs"`
+	Version   string        `yaml:"Version"`
+	OutputDir string        `yaml:"OutputDir"`
+	Docs      DocsConfig    `yaml:"Docs"`
+	Servers   ServersConfig `yaml:"Servers"`
 }
 
 type DocsConfig struct {
+	Public   DocConfig `yaml:"Public"`
+	Internal DocConfig `yaml:"Internal"`
+	Renderer string    `yaml:"Renderer"`
+}
+
+type DocConfig struct {
+	URL    string `yaml:"url"`
+	Schema string `yaml:"schema"`
+}
+
+type ServersConfig struct {
 	Public   string `yaml:"Public"`
 	Internal string `yaml:"Internal"`
 }
@@ -121,7 +137,7 @@ func LoadConfig(filePath string) error {
 
 	if decodeErr != nil {
 		if closeErr != nil {
-			return fmt.Errorf("error decoding config file: %v; additionally, error closing file: %w", decodeErr, closeErr)
+			return errors.Join(fmt.Errorf("error decoding config file: %w", decodeErr), fmt.Errorf("error closing file: %w", closeErr))
 		}
 		return fmt.Errorf("error decoding config file: %w", decodeErr)
 	}
@@ -129,6 +145,6 @@ func LoadConfig(filePath string) error {
 		return fmt.Errorf("error closing config file: %w", closeErr)
 	}
 
-	fmt.Println("Configuration loaded")
+	log.Println("Configuration loaded")
 	return nil
 }

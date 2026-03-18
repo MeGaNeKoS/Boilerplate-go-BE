@@ -9,6 +9,12 @@ type JWTUser struct {
 	Data        JWTData `json:"data"`
 	jwt.RegisteredClaims
 }
+
+// GetEnvironment implements the environmentClaims interface used by JWT
+// validation to avoid reflection.
+func (u *JWTUser) GetEnvironment() string {
+	return u.Environment
+}
 type JWTData struct {
 	UserId     string     `json:"userId"`
 	Permission Permission `json:"permission"`

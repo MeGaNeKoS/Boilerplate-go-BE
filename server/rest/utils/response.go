@@ -1,7 +1,8 @@
-package resthuma
+package utils
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -35,6 +36,13 @@ func NewResponse[T any](status int, body T) *Response[T] {
 		switch b := any(body).(type) {
 		case []byte:
 			_, _ = ctx.BodyWriter().Write(b)
+		case string:
+			_, _ = ctx.BodyWriter().Write([]byte(b))
+		case io.Reader:
+			_, _ = io.Copy(ctx.BodyWriter(), b)
+			if c, ok := b.(io.Closer); ok {
+				_ = c.Close()
+			}
 		default:
 			_ = json.NewEncoder(ctx.BodyWriter()).Encode(b)
 		}

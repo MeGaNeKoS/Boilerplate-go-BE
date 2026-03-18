@@ -6,7 +6,7 @@ import (
 	"io"
 )
 
-var randReader io.Reader = rand.Reader
+var randReader = rand.Reader
 
 // UniqueIdByTime generates a pseudo-random hexadecimal string. The counter
 // argument is unused but kept for backward compatibility with older helpers.

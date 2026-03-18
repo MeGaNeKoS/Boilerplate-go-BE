@@ -21,7 +21,7 @@ import (
 	"project-template/pkg/logger"
 )
 
-// ----- ExampleOutbound error paths -----
+// ----- Outbound error paths -----
 
 func TestExampleOutboundErrorPaths(t *testing.T) {
 	l := stubLogger{parent: "p"}
@@ -44,7 +44,7 @@ func TestExampleOutboundErrorPaths(t *testing.T) {
 	monkey.UnpatchAll()
 }
 
-// ----- ExampleGRPCOutbound additional cases -----
+// ----- GrpcOutbound additional cases -----
 
 func TestGetItemTypeError(t *testing.T) {
 	config.Cfg = &config.Config{Service: config.Service{Example: config.ServiceDetail{Host: "h"}}}
@@ -174,4 +174,58 @@ func TestPublishItemAndWaitTimeout(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
 		t.Fatalf("expected timeout error, got %v", err)
 	}
+}
+
+func TestPublishItemAndWaitUniqueIdError(t *testing.T) {
+	l := stubLogger{parent: "p"}
+	config.Cfg = &config.Config{Kafka: config.KafkaConfig{Brokers: []string{"b"}, Topic: "t"}, Server: config.ServerConfig{Timeout: config.TimeoutConfig{Server: 1}}}
+	newKafkaWriter = func([]string, string) kafkaWriter { return &stubWriter{} }
+	newKafkaReader = func(kafka.ReaderConfig) kafkaReader { return &seqReader{} }
+
+	monkey.Patch(utils.UniqueIdByTime, func(uint64) (string, error) { return "", errors.New("id-gen") })
+	defer monkey.Unpatch(utils.UniqueIdByTime)
+
+	_, err := NewExampleKafkaOutbound(l).(*exampleKafkaOutbound).PublishItemAndWait(context.Background(), models.Item{})
+	if err == nil || !strings.Contains(err.Error(), "correlation ID") {
+		t.Fatalf("expected correlation ID error, got %v", err)
+	}
+}
+
+type errCloseReader struct {
+	msgs []kafka.Message
+	idx  int
+}
+
+func (s *errCloseReader) ReadMessage(ctx context.Context) (kafka.Message, error) {
+	if s.idx >= len(s.msgs) {
+		<-ctx.Done()
+		return kafka.Message{}, ctx.Err()
+	}
+	m := s.msgs[s.idx]
+	s.idx++
+	return m, nil
+}
+
+func (s *errCloseReader) Close() error { return errors.New("close-err") }
+
+func TestPublishItemAndWaitReaderCloseError(t *testing.T) {
+	l := stubLogger{parent: "p"}
+	config.Cfg = &config.Config{Kafka: config.KafkaConfig{Brokers: []string{"b"}, Topic: "t"}, Server: config.ServerConfig{Timeout: config.TimeoutConfig{Server: 1}}}
+	newKafkaWriter = func([]string, string) kafkaWriter { return &stubWriter{} }
+
+	er := &errCloseReader{msgs: []kafka.Message{{
+		Headers: []kafka.Header{{Key: "correlation-id", Value: []byte("cid")}},
+		Value:   []byte("{}"),
+	}}}
+	newKafkaReader = func(kafka.ReaderConfig) kafkaReader { return er }
+
+	monkey.Patch(utils.UniqueIdByTime, func(uint64) (string, error) { return "cid", nil })
+	defer monkey.Unpatch(utils.UniqueIdByTime)
+
+	got, err := NewExampleKafkaOutbound(l).(*exampleKafkaOutbound).PublishItemAndWait(context.Background(), models.Item{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The reader close error is only logged, not returned.
+	_ = got
 }

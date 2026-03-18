@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	stdlog "log"
 	"project-template/infrastructure/config"
 	"project-template/pkg/logger"
 	"sync"
@@ -65,11 +64,7 @@ func (d *dbImpl) New() error {
 		)
 		d.db, err = sql.Open("mysql", dsn)
 		if err != nil {
-			if d.logger != nil {
-				d.logger.FatalF("Error connecting to database: %v", err)
-			} else {
-				stdlog.Fatalf("Error connecting to database: %v", err)
-			}
+			d.logFatal("Error connecting to database: %v", err)
 		}
 
 		d.db.SetConnMaxLifetime(time.Minute * 4)
@@ -77,27 +72,14 @@ func (d *dbImpl) New() error {
 		d.db.SetMaxIdleConns(30)
 
 		if err = d.db.Ping(); err != nil {
-			closeErr := d.db.Close()
-			if closeErr != nil {
-				if d.logger != nil {
-					d.logger.FatalF("Error closing the database connection: %v", closeErr)
-				} else {
-					stdlog.Fatalf("Error closing the database connection: %v", closeErr)
-				}
+			if closeErr := d.db.Close(); closeErr != nil {
+				d.logFatal("Error closing the database connection: %v", closeErr)
 			}
 			d.db = nil
-			if d.logger != nil {
-				d.logger.FatalF("Lost connection to database: %v", err)
-			} else {
-				stdlog.Fatalf("Lost connection to database: %v", err)
-			}
+			d.logFatal("Lost connection to database: %v", err)
 		}
 
-		if d.logger != nil {
-			d.logger.InfoF("Successfully connected to database")
-		} else {
-			stdlog.Println("Successfully connected to database")
-		}
+		d.logInfo("Successfully connected to database")
 	})
 
 	if d.db == nil {

@@ -11,10 +11,15 @@ import (
 // dummyLogger satisfies the logger.Logger interface for context tests.
 type dummyLogger struct{}
 
+func (dummyLogger) Debug(string)                  {}
 func (dummyLogger) DebugF(string, ...interface{}) {}
+func (dummyLogger) Info(string)                    {}
 func (dummyLogger) InfoF(string, ...interface{})  {}
+func (dummyLogger) Warn(string)                    {}
 func (dummyLogger) WarnF(string, ...interface{})  {}
+func (dummyLogger) Error(string)                   {}
 func (dummyLogger) ErrorF(string, ...interface{}) {}
+func (dummyLogger) Fatal(string)                   {}
 func (dummyLogger) FatalF(string, ...interface{}) {}
 func (dummyLogger) ParentID() string              { return "" }
 func (dummyLogger) ChildID() string               { return "" }

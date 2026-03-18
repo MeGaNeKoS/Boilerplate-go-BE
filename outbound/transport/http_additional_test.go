@@ -27,10 +27,15 @@ import (
 // stubLogger is a minimal logger implementation for tests.
 type stubLogger struct{ parent string }
 
+func (stubLogger) Debug(string)                  {}
 func (stubLogger) DebugF(string, ...interface{}) {}
+func (stubLogger) Info(string)                    {}
 func (stubLogger) InfoF(string, ...interface{})  {}
+func (stubLogger) Warn(string)                    {}
 func (stubLogger) WarnF(string, ...interface{})  {}
+func (stubLogger) Error(string)                   {}
 func (stubLogger) ErrorF(string, ...interface{}) {}
+func (stubLogger) Fatal(string)                   {}
 func (stubLogger) FatalF(string, ...interface{}) {}
 func (s stubLogger) ParentID() string            { return s.parent }
 func (stubLogger) ChildID() string               { return "" }
@@ -56,7 +61,7 @@ func TestHandleResponseNon2xx(t *testing.T) {
 
 func TestSendHTTPRequestHandleResponseErrorAndCloseWarn(t *testing.T) {
 	config.Cfg = &config.Config{Server: config.ServerConfig{Timeout: config.TimeoutConfig{Server: 1}, SkipTLSVerify: true}}
-	o := &HTTPOutbound{Host: "http://example", Path: "/", Method: http.MethodGet, Response: &struct{}{}}
+	o := &HTTPOutbound{Host: "https://example", Path: "/", Method: http.MethodGet, Response: &struct{}{}}
 
 	monkey.Patch(sendHTTPRequest, func(_ *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Body: errCloseReader{strings.NewReader("{}")}}, nil
@@ -92,8 +97,8 @@ func TestGRPCOutboundInvokeInvokeError(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := grpc.NewServer()
-	go srv.Serve(lis)
-	defer srv.Stop()
+	go func() { _ = srv.Serve(lis) }()
+	defer srv.GracefulStop()
 
 	original := grpc.NewClient
 	conn, errDial := original(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))

@@ -2,10 +2,12 @@ package middleware
 
 import (
 	"net/http"
+	"runtime"
+
 	"project-template/infrastructure/supervisor"
 	"project-template/infrastructure/utils"
+	"project-template/pkg/code"
 	"project-template/pkg/logger"
-	"runtime"
 )
 
 // RecoverMiddleware catches panics from handlers, logs the stack trace and
@@ -27,7 +29,8 @@ func RecoverMiddleware(global logger.Logger) func(http.Handler) http.Handler {
 					reqLog.ErrorF("Recovered panic: %v\nStack trace:\n%s", err, stack[:n])
 					w.Header().Set("X-Recovered-By", "RecoverMiddleware")
 
-					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+					respond(w, utils.GenerateErrorResponse(code.ErrInternalServerError).
+						WithInstance(r.URL.Path))
 					if flusher, ok := w.(http.Flusher); ok {
 						flusher.Flush()
 					}

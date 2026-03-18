@@ -64,7 +64,7 @@ func TestFetchItemByIDSendsHeaders(t *testing.T) {
 	config.Cfg = &config.Config{Service: config.Service{Example: config.ServiceDetail{Host: "h"}}}
 	l := stubLogger{parent: "p"}
 	o := NewExampleOutbound(l)
-	ctx := utils.SetTokenCtx(context.Background(), utils.SecureString("tok"))
+	ctx := utils.SetTokenCtx(context.Background(), "tok")
 
 	var headers map[string]string
 	monkey.PatchInstanceMethod(reflect.TypeOf(&transport.HTTPOutbound{}), "SendHTTPRequest", func(out *transport.HTTPOutbound, _ logger.Logger) (response.HttpResponse, *codepkg.Code) {

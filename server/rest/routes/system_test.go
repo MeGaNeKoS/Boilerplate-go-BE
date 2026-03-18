@@ -5,13 +5,15 @@ import (
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
-	humachi "github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 )
 
 func TestSystemRouter(t *testing.T) {
 	r := chi.NewRouter()
-	api := humachi.New(r, huma.DefaultConfig("x", "1"))
+	cfg := huma.DefaultConfig("x", "1")
+	cfg.CreateHooks = nil
+	api := humachi.New(r, cfg)
 	SystemRouter(huma.NewGroup(api, ""))
 	got := map[string]bool{}
 	err := chi.Walk(r, func(method string, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {

@@ -14,7 +14,7 @@ func TestSecureString(t *testing.T) {
 }
 
 func TestSecureBytes(t *testing.T) {
-	b := SecureBytes([]byte("byte-secret"))
+	b := SecureBytes("byte-secret")
 	if got := b.String(); got != strings.Repeat("*", len("byte-secret")) {
 		t.Fatalf("unexpected mask: %s", got)
 	}
@@ -45,7 +45,7 @@ func TestSecureEmptyAndGoString(t *testing.T) {
 	if s.GoString() != s.String() {
 		t.Fatalf("GoString mismatch")
 	}
-	b := SecureBytes([]byte("val"))
+	b := SecureBytes("val")
 	if b.GoString() != b.String() {
 		t.Fatalf("GoString bytes mismatch")
 	}

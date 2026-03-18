@@ -15,7 +15,7 @@ type exampleGRPCOutbound struct {
 	log logger.Logger
 }
 
-func NewExampleGRPCOutbound(l logger.Logger) ExampleGRPCOutbound {
+func NewExampleGRPCOutbound(l logger.Logger) GrpcOutbound {
 	return &exampleGRPCOutbound{log: l}
 }
 

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	stdlog "log"
 	"project-template/infrastructure/utils"
@@ -27,13 +28,33 @@ func (d *dbImpl) GetGoquDialect() goqu.DialectWrapper {
 // connection was not initialized.
 func (d *dbImpl) GetDB() *sql.DB {
 	if d.db == nil {
-		if d.logger != nil {
-			d.logger.FatalF("Database connection is not initialized. Call Connect first.")
-		} else {
-			stdlog.Fatalf("Database connection is not initialized. Call Connect first.")
-		}
+		d.logFatal("Database connection is not initialized. Call Connect first.")
 	}
 	return d.db
+}
+
+func (d *dbImpl) logFatal(format string, args ...interface{}) {
+	if d.logger != nil {
+		d.logger.FatalF(format, args...)
+	} else {
+		stdlog.Fatalf(format, args...)
+	}
+}
+
+func (d *dbImpl) logInfo(format string, args ...interface{}) {
+	if d.logger != nil {
+		d.logger.InfoF(format, args...)
+	} else {
+		stdlog.Printf(format, args...)
+	}
+}
+
+func (d *dbImpl) logError(format string, args ...interface{}) {
+	if d.logger != nil {
+		d.logger.ErrorF(format, args...)
+	} else {
+		stdlog.Printf(format, args...)
+	}
 }
 
 // ExecContext executes a statement within an existing transaction if present,
@@ -48,7 +69,7 @@ func (d *dbImpl) ExecContext(ctx context.Context, query string, args ...interfac
 }
 
 // WithTransaction executes fn within a DB transaction.
-func (d *dbImpl) WithTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
+func (d *dbImpl) WithTransaction(ctx context.Context, fn func(ctx context.Context) error) (txErr error) {
 	txCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -59,13 +80,16 @@ func (d *dbImpl) WithTransaction(ctx context.Context, fn func(ctx context.Contex
 
 	defer func() {
 		if p := recover(); p != nil {
-			_ = tx.Rollback()
+			if rbErr := tx.Rollback(); rbErr != nil {
+				d.logError("rollback after panic failed: %v", rbErr)
+			}
+			txErr = fmt.Errorf("panic in transaction: %v", p)
 		}
 	}()
 
 	if err = fn(utils.SetTxCtx(txCtx, tx)); err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil {
-			return rbErr
+			return errors.Join(fmt.Errorf("rollback failed: %w", rbErr), fmt.Errorf("original error: %w", err))
 		}
 		return err
 	}

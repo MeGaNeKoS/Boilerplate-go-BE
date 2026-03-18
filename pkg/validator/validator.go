@@ -30,38 +30,38 @@ func ValidateStruct(obj interface{}) error {
 	return customError(err)
 }
 
+// tagMessages maps validation tags to human-readable format strings.
+// Use %s for the field name and %s for the parameter where applicable.
+var tagMessages = map[string]string{
+	"required": "%s is required",
+	"email":    "%s is not a valid email",
+	"unique":   "%s must have a unique value",
+	"notEmpty": "%s cannot be empty",
+	"max":      "%s value must be lower than %s",
+	"min":      "%s value must be greater than %s",
+	"oneof":    "%s must be one of: %s",
+}
+
 func customError(err error) error {
 	if err == nil {
 		return nil
 	}
 	var castedObject validator.ValidationErrors
 	if errors.As(err, &castedObject) {
-		for _, err := range castedObject {
-			switch err.Tag() {
-			case "required":
-				return NewValidationError(fmt.Sprintf("%s is required",
-					err.Field()))
-			case "email":
-				return NewValidationError(fmt.Sprintf("%s is not valid email",
-					err.Field()))
-			case "unique":
-				return NewValidationError(fmt.Sprintf("%s must unique value",
-					err.Field()))
-			case "notEmpty":
-				return NewValidationError(fmt.Sprintf("%s can not be empty",
-					err.Field()))
-			case "max":
-				return NewValidationError(fmt.Sprintf("%s value must be lower than %s", err.Field(), err.Param()))
-			case "min":
-				return NewValidationError(fmt.Sprintf("%s value must be grather than %s", err.Field(), err.Param()))
+		for _, fe := range castedObject {
+			switch fe.Tag() {
 			case "notBeforeNow":
-				return NewValidationError(fmt.Sprintf("%s must be greater than %s", err.Field(), time.Now().Format("2006-01-02")))
+				return NewValidationError(fmt.Sprintf("%s must be greater than %s", fe.Field(), time.Now().Format("2006-01-02")))
 			case "notAfterNow":
-				return NewValidationError(fmt.Sprintf("%s must be earlier than %s", err.Field(), time.Now().Format("2006-01-02")))
-			case "oneof":
-				return NewValidationError(fmt.Sprintf("%s must be one of = %s", err.Field(), err.Param()))
+				return NewValidationError(fmt.Sprintf("%s must be earlier than %s", fe.Field(), time.Now().Format("2006-01-02")))
 			default:
-				return NewValidationError(fmt.Sprintf("%s validation error on %s tag", err.Field(), err.ActualTag()))
+				if tmpl, ok := tagMessages[fe.Tag()]; ok {
+					if fe.Param() != "" {
+						return NewValidationError(fmt.Sprintf(tmpl, fe.Field(), fe.Param()))
+					}
+					return NewValidationError(fmt.Sprintf(tmpl, fe.Field()))
+				}
+				return NewValidationError(fmt.Sprintf("%s validation error on %s tag", fe.Field(), fe.ActualTag()))
 			}
 		}
 	}

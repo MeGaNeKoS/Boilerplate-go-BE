@@ -35,3 +35,4 @@ func TestServiceCaching(t *testing.T) {
 		t.Fatalf("Kafka outbound not cached")
 	}
 }
+

@@ -131,8 +131,8 @@ func TestWatchLoop(t *testing.T) {
 	close(w.Events)
 	close(w.Errors)
 
-	core.logFile.Close()
-	core.levelFile[ERROR].Close()
+	_ = core.logFile.Close()
+	_ = core.levelFile[ERROR].Close()
 }
 
 func TestWatchLoopErrorsClose(t *testing.T) {
@@ -162,8 +162,8 @@ func TestWatchLoopErrorsClose(t *testing.T) {
 	}
 
 	close(w.Events)
-	core.logFile.Close()
-	core.levelFile[ERROR].Close()
+	_ = core.logFile.Close()
+	_ = core.levelFile[ERROR].Close()
 }
 
 func TestStartWatchersNewWatcherError(t *testing.T) {
@@ -180,8 +180,105 @@ func TestStartWatchersNewWatcherError(t *testing.T) {
 		t.Fatalf("expected no watchers, got %d", len(core.watchers))
 	}
 
-	core.logFile.Close()
-	core.levelFile[ERROR].Close()
+	_ = core.logFile.Close()
+	_ = core.levelFile[ERROR].Close()
+}
+
+func TestReopenFileMaxRetries(t *testing.T) {
+	dir := t.TempDir()
+	core, _, _ := newCoreWithFiles(t, dir)
+
+	monkey.Patch(os.OpenFile, func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		return nil, fmt.Errorf("always fail")
+	})
+	// Skip sleep to make the test fast.
+	monkey.Patch(time.Sleep, func(time.Duration) {})
+	defer monkey.UnpatchAll()
+
+	// reopenFile should exhaust all retries and log a failure message, not panic.
+	core.reopenFile(core.logFilePath)
+
+	// The log file should remain unchanged (not nil-ed out).
+	if core.logFile == nil {
+		t.Fatalf("logFile should still be the original file")
+	}
+	_ = core.logFile.Close()
+	_ = core.levelFile[ERROR].Close()
+}
+
+func TestStartWatchersAddErrorCloseFailure(t *testing.T) {
+	dir := t.TempDir()
+	core, _, _ := newCoreWithFiles(t, dir)
+
+	monkey.Patch(fsnotify.NewBufferedWatcher, func(uint) (*fsnotify.Watcher, error) {
+		return &fsnotify.Watcher{Events: make(chan fsnotify.Event), Errors: make(chan error)}, nil
+	})
+	m, _ := reflect.TypeOf(&fsnotify.Watcher{}).MethodByName("AddWith")
+	monkey.PatchInstanceMethod(reflect.TypeOf(&fsnotify.Watcher{}), "AddWith", reflect.MakeFunc(m.Type, func(args []reflect.Value) []reflect.Value {
+		return []reflect.Value{reflect.ValueOf(fmt.Errorf("add error"))}
+	}).Interface())
+	// Make Close return an error to cover the cerr branch in startWatchers.
+	monkey.PatchInstanceMethod(reflect.TypeOf(&fsnotify.Watcher{}), "Close", func(*fsnotify.Watcher) error {
+		return fmt.Errorf("close error")
+	})
+	defer monkey.UnpatchAll()
+
+	core.startWatchers()
+	if len(core.watchers) != 0 {
+		t.Fatalf("expected no watchers, got %d", len(core.watchers))
+	}
+
+	_ = core.logFile.Close()
+	_ = core.levelFile[ERROR].Close()
+}
+
+func TestReopenFileLevelCloseError(t *testing.T) {
+	dir := t.TempDir()
+	core, _, oldLF := newCoreWithFiles(t, dir)
+
+	// Close the level file first so that the close inside reopenFile hits an error.
+	_ = oldLF.Close()
+
+	var patch *monkey.PatchGuard
+	patch = monkey.Patch(os.OpenFile, func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		patch.Unpatch()
+		defer patch.Restore()
+		return os.OpenFile(name, flag, perm)
+	})
+	defer patch.Unpatch()
+
+	core.reopenFile(core.levelFilePath[ERROR])
+
+	nf := core.levelFile[ERROR]
+	if nf == oldLF {
+		t.Fatalf("level file not replaced")
+	}
+	_ = core.levelFile[ERROR].Close()
+	_ = core.logFile.Close()
+}
+
+func TestReopenFileDefaultCloseError(t *testing.T) {
+	dir := t.TempDir()
+	core, oldF, _ := newCoreWithFiles(t, dir)
+
+	// Close the default file first so that the close inside reopenFile hits an error.
+	_ = oldF.Close()
+
+	var patch *monkey.PatchGuard
+	patch = monkey.Patch(os.OpenFile, func(name string, flag int, perm os.FileMode) (*os.File, error) {
+		patch.Unpatch()
+		defer patch.Restore()
+		return os.OpenFile(name, flag, perm)
+	})
+	defer patch.Unpatch()
+
+	core.reopenFile(core.logFilePath)
+
+	if core.logFile == oldF {
+		t.Fatalf("log file not replaced")
+	}
+	_ = core.logFile.Close()
+	_ = core.levelFile[ERROR].Close()
 }
 
 func TestStartWatchersAddError(t *testing.T) {
@@ -210,6 +307,6 @@ func TestStartWatchersAddError(t *testing.T) {
 		t.Fatalf("expected no watchers, got %d", len(core.watchers))
 	}
 
-	core.logFile.Close()
-	core.levelFile[ERROR].Close()
+	_ = core.logFile.Close()
+	_ = core.levelFile[ERROR].Close()
 }

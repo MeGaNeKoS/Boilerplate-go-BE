@@ -28,10 +28,15 @@ func patchServer(l logger.Logger, err error) func() {
 
 type stubLogger struct{}
 
+func (stubLogger) Debug(string)                  {}
 func (stubLogger) DebugF(string, ...interface{}) {}
+func (stubLogger) Info(string)                    {}
 func (stubLogger) InfoF(string, ...interface{})  {}
+func (stubLogger) Warn(string)                    {}
 func (stubLogger) WarnF(string, ...interface{})  {}
+func (stubLogger) Error(string)                   {}
 func (stubLogger) ErrorF(string, ...interface{}) {}
+func (stubLogger) Fatal(string)                   {}
 func (stubLogger) FatalF(string, ...interface{}) {}
 func (stubLogger) ParentID() string              { return "" }
 func (stubLogger) ChildID() string               { return "" }

@@ -1,0 +1,62 @@
+AppName: example
+Version: "1"
+ExternalService:
+  Example:
+    Host: "https://localhost:8080"
+Server:
+  Environment: "dev"
+  SkipTLSVerify: true
+  Timeout:
+    Server: 10
+    Read: 10
+    Write: 10
+    Idle: 30
+  Duration: 10
+  Endpoint:
+    Based: "/test"
+  JWT:
+    PrivateKey: ""
+    PublicKey: ""
+  InternalCIDRs:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+    - "127.0.0.0/8"
+REST:
+  Host: "0.0.0.0"
+  Port: "8080"
+GRPC:
+  Host: "0.0.0.0"
+  Port: "8081"
+Kafka:
+  Brokers: ["localhost:9092"]
+  GroupID: "item-consumer"
+  Topic: "items"
+Database:
+  Host: ""
+  Port: ""
+  User: ""
+  Password: ""
+  DBName: ""
+  MigrationPath: "file://migrations"
+  DirtyStrategy: "retry"
+LogTarget:
+  Path: "./log"
+  FileName: "app.log"
+  PerLevelFiles: {}
+  VerboseLevel: "DEBUG"
+  AlsoLogToStdout: true
+OpenAPI:
+  Version: "3.0.3"
+  Docs:
+    Public:
+      url: "/docs/public"
+      schema: "/schema/v1"
+    Internal:
+      url: "/docs/internal"
+      schema: "/schema"
+    Renderer: "stoplight"
+  # Base URLs used in generated OpenAPI docs and schema IDs.
+  Servers:
+    Public: "https://localhost:8080"
+    Internal: ""

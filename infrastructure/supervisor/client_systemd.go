@@ -9,6 +9,25 @@ import (
 	"strings"
 )
 
+// sendToSupervisor writes msg to the supervisor Unix socket.
+func sendToSupervisor(msg string) error {
+	socket := os.Getenv("SUPERVISOR_SOCKET")
+	if socket == "" {
+		return errors.New("no suitable socket found")
+	}
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := conn.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+	_, err = conn.Write([]byte(msg + "\n"))
+	return err
+}
+
 // RequestRestart sends a restart request for SELF_SERVICE_UNIT to the
 // supervisor. If TEMP_SERVICE_UNIT is set, it will be included so the
 // supervisor can start it first before restarting the main service.
@@ -24,20 +43,7 @@ func RequestRestart() error {
 	if tmp := os.Getenv("TEMP_SERVICE_UNIT"); tmp != "" {
 		msg = msg + "," + tmp
 	}
-
-	socket := os.Getenv("SUPERVISOR_SOCKET")
-	if socket == "" {
-		return errors.New("No suitable socket found")
-	}
-
-	conn, err := net.Dial("unix", socket)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	_, err = conn.Write([]byte(msg + "\n"))
-	return err
+	return sendToSupervisor(msg)
 }
 
 // OnStartUp stops the temporary service specified by TEMP_SERVICE_UNIT when
@@ -52,15 +58,5 @@ func OnStartUp() error {
 	if temp == "" {
 		return nil
 	}
-	socket := os.Getenv("SUPERVISOR_SOCKET")
-	if socket == "" {
-		return errors.New("No suitable socket found")
-	}
-	conn, err := net.Dial("unix", socket)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	_, err = conn.Write([]byte("stop " + temp + "\n"))
-	return err
+	return sendToSupervisor("stop " + temp)
 }

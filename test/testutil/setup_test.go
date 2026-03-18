@@ -77,7 +77,7 @@ func TestMockDBWithTransaction(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectRollback()
 	expErr := errors.New("fail")
-	if err := m.WithTransaction(context.Background(), func(context.Context) error { return expErr }); err != expErr {
+	if err := m.WithTransaction(context.Background(), func(context.Context) error { return expErr }); !errors.Is(err, expErr) {
 		t.Fatalf("%v != %v", err, expErr)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

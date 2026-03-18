@@ -34,8 +34,7 @@ func TestServiceLong(t *testing.T) {
 	svc := NewService()
 
 	var slept bool
-	var patch *monkey.PatchGuard
-	patch = monkey.Patch(time.Sleep, func(time.Duration) { slept = true })
+	patch := monkey.Patch(time.Sleep, func(time.Duration) { slept = true })
 	defer patch.Unpatch()
 
 	resp, code := svc.Long(context.Background(), 1)

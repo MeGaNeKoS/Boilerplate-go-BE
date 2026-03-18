@@ -1,16 +1,17 @@
-package resthuma_test
+package utils_test
 
 import (
+	"errors"
 	"testing"
 
 	"project-template/pkg/code"
 	"project-template/server/rest/handlers"
-	"project-template/server/rest/handlers/resthuma"
+	restutils "project-template/server/rest/utils"
 )
 
 func containsCode(list []*code.Code, c *code.Code) bool {
 	for _, v := range list {
-		if v == c {
+		if errors.Is(v, c) {
 			return true
 		}
 	}
@@ -27,10 +28,10 @@ func TestInferErrorCodes(t *testing.T) {
 		{handlers.GetItem, []*code.Code{code.ErrInternalServerError, code.ErrItemNotFound}},
 		{handlers.UpdateItem, []*code.Code{code.ErrInternalServerError}},
 		{handlers.DeleteItem, []*code.Code{code.ErrInternalServerError}},
-		{resthuma.RegisterExamples, nil},
+		{restutils.RegisterExamples, nil},
 	}
 	for _, c := range cases {
-		got := resthuma.InferErrorCodes(c.handler)
+		got := restutils.InferErrorCodes(c.handler)
 		if len(got) < len(c.expected) {
 			t.Fatalf("expected at least %d codes, got %d", len(c.expected), len(got))
 		}

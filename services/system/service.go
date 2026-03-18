@@ -21,15 +21,15 @@ func NewService() ServiceImpl {
 	return &Service{}
 }
 
-func (s *Service) Echo(ctx context.Context) (interface{}, *code.Code) {
+func (s *Service) Echo(_ context.Context) (interface{}, *code.Code) {
 	return "echo", nil
 }
 
-func (s *Service) Crash(ctx context.Context) {
+func (s *Service) Crash(_ context.Context) {
 	panic("intentional crash")
 }
 
-func (s *Service) Long(ctx context.Context, sleepSeconds int) (interface{}, *code.Code) {
+func (s *Service) Long(_ context.Context, sleepSeconds int) (interface{}, *code.Code) {
 	if sleepSeconds > 0 {
 		time.Sleep(time.Duration(sleepSeconds) * time.Second)
 	}

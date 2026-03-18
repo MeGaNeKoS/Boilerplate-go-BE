@@ -1,4 +1,4 @@
-package resthuma
+package utils
 
 import (
 	"encoding/json"
@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +31,11 @@ var (
 	cacheMu   sync.Mutex
 )
 
+// precomputedErrors holds error code names populated by the generator.
+// It remains empty in source control so builds succeed even without running
+// go generate.
+var precomputedErrors = map[string][]string{}
+
 // Empty is an empty input used when a route does not accept any parameters.
 type Empty struct{}
 
@@ -40,18 +46,96 @@ var (
 	exampleValueIndex = map[string]string{}
 )
 
-var registry = huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer)
+// ResetExampleRegistry clears the global example registry. Intended for use
+// in tests to prevent state leaking between test cases.
+func ResetExampleRegistry() {
+	examples = map[string]*huma.Example{}
+	exampleCounter = map[string]int{}
+	exampleValueIndex = map[string]string{}
+}
+
+var registry = huma.NewMapRegistry("#/components/schemas/", schemaNamer)
+
+func upperFirst(s string) string {
+	if s == "" {
+		return ""
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func typeLabel(t reflect.Type) string {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.Slice:
+		if t.Elem().Kind() == reflect.Uint8 {
+			return "Binary"
+		}
+		return typeLabel(t.Elem()) + "List"
+	case reflect.Interface:
+		return "Any"
+	case reflect.Struct:
+		if t.Name() != "" {
+			return t.Name()
+		}
+		if t.NumField() == 0 {
+			return "Any"
+		}
+		return "Struct"
+	default:
+		if t.Name() != "" {
+			return upperFirst(t.Name())
+		}
+		return upperFirst(t.Kind().String())
+	}
+}
+
+func schemaNamer(t reflect.Type, hint string) string {
+	if t.PkgPath() == "project-template/infrastructure/dto/response" && strings.HasPrefix(t.Name(), "GenericResponse[") {
+		if f, ok := t.FieldByName("Body"); ok {
+			return typeLabel(f.Type) + "Response"
+		}
+	}
+	return huma.DefaultSchemaNamer(t, hint)
+}
 
 // schema for BaseResponse without a body
-var baseResponseSchema = huma.SchemaFromType(registry, reflect.TypeOf(response.BaseResponse{}))
+var baseResponseSchema = func() *huma.Schema {
+	s := registry.Schema(reflect.TypeOf(response.BaseResponse{}), true, "")
+	// Allow composition with a body by omitting additionalProperties.
+	s.AdditionalProperties = nil
+	return s
+}()
 
-// schema for RFC 7807 problem details
-var problemDetailSchema = huma.SchemaFromType(registry, reflect.TypeOf(response.ProblemDetail{}))
+// schema for RFC 9457 problem details
+var problemDetailSchema = func() *huma.Schema {
+	ref := registry.Schema(reflect.TypeOf(response.ProblemDetail{}), true, "")
+	if s := registry.SchemaFromRef(ref.Ref); s != nil {
+		// Allow extension members as permitted by RFC 7807.
+		s.AdditionalProperties = true
+
+		if p, ok := s.Properties["type"]; ok {
+			p.Type = huma.TypeString
+			p.Format = "uri-reference"
+			p.AnyOf = nil
+		}
+		if p, ok := s.Properties["instance"]; ok {
+			p.Format = "uri-reference"
+		}
+		if p, ok := s.Properties["status"]; ok {
+			p.Format = "int32"
+		}
+	}
+	return ref
+}()
 
 // humaError adapts project error codes to huma.StatusError.
 type humaError struct {
-	status int
-	Body   response.ProblemDetail
+	status          int
+	wwwAuthenticate string
+	retryAfter      string
+	Body            response.ProblemDetail
 }
 
 func (e *humaError) Error() string  { return e.Body.Title }
@@ -59,6 +143,15 @@ func (e *humaError) GetStatus() int { return e.status }
 func (e *humaError) GetHeaders() http.Header {
 	h := http.Header{}
 	h.Set("Content-Type", "application/problem+json")
+	if e.wwwAuthenticate != "" {
+		h.Set("WWW-Authenticate", e.wwwAuthenticate)
+	}
+	if e.retryAfter != "" {
+		h.Set("Retry-After", e.retryAfter)
+	}
+	if link := schemaLinkFromRef(nil, problemDetailSchema.Ref); link != "" {
+		h.Set("Link", link)
+	}
 	return h
 }
 
@@ -89,6 +182,22 @@ func NewError(c *code.Code, msg ...string) error {
 	return newHumaError(c, msg...)
 }
 
+// NewAuthError converts a Code to an error that includes a WWW-Authenticate
+// header.
+func NewAuthError(c *code.Code, wwwAuth string, msg ...string) error {
+	e := newHumaError(c, msg...)
+	e.wwwAuthenticate = wwwAuth
+	return e
+}
+
+// NewRetryableError converts a Code to an error that includes a Retry-After
+// header.
+func NewRetryableError(c *code.Code, retryAfterSeconds int, msg ...string) error {
+	e := newHumaError(c, msg...)
+	e.retryAfter = strconv.Itoa(retryAfterSeconds)
+	return e
+}
+
 // success wraps a successful response body with our standard GenericResponse.
 // If status is 0, http.StatusOK is used.
 func success[T any](body T, status int) *response.GenericResponse[T] {
@@ -110,7 +219,17 @@ func success[T any](body T, status int) *response.GenericResponse[T] {
 
 // SuccessResponse builds a Huma response with the standard success envelope.
 func SuccessResponse[T any](status int, body T) *Response[*response.GenericResponse[T]] {
-	return NewResponse(status, success(body, status))
+	r := NewResponse(status, success(body, status))
+	grType := reflect.TypeOf(response.GenericResponse[T]{})
+	schema := registry.Schema(grType, true, "")
+	orig := r.Body
+	r.Body = func(ctx huma.Context) {
+		if link := schemaLinkFromRef(ctx, schema.Ref); link != "" {
+			ctx.SetHeader("Link", link)
+		}
+		orig(ctx)
+	}
+	return r
 }
 
 // NoContentResponse returns a 204 No Content response.
@@ -152,17 +271,47 @@ func registerExample(name string, value any) *huma.Example {
 	return &huma.Example{Ref: "#/components/examples/" + name}
 }
 
+// SuccessMeta stores optional metadata for a success response.
+type SuccessMeta struct {
+	ContentType string
+	Headers     map[string]*huma.Param
+}
+
 // Success represents a successful response example and metadata.
 type Success[T any] struct {
 	Status      int
 	Description string
 	Body        T
+	SuccessMeta
+}
+
+// SuccessOption configures optional fields on Success.
+type SuccessOption func(*SuccessMeta)
+
+// WithContentType sets the content type for the success response.
+func WithContentType(ct string) SuccessOption {
+	return func(m *SuccessMeta) { m.ContentType = ct }
+}
+
+// WithHeaders sets the headers for the success response.
+func WithHeaders(h map[string]*huma.Param) SuccessOption {
+	return func(m *SuccessMeta) { m.Headers = h }
 }
 
 // NewSuccess creates a Success value with the given status, description and body.
-func NewSuccess[T any](status int, desc string, body T) Success[T] {
-	return Success[T]{Status: status, Description: desc, Body: body}
+func NewSuccess[T any](status int, desc string, body T, opts ...SuccessOption) Success[T] {
+	s := Success[T]{Status: status, Description: desc, Body: body, SuccessMeta: SuccessMeta{ContentType: "application/json"}}
+	for _, opt := range opts {
+		opt(&s.SuccessMeta)
+	}
+	return s
 }
+
+// Successes returns a slice of Success values, allowing type inference at the call site.
+func Successes[T any](s ...Success[T]) []Success[T] { return s }
+
+// NoSuccesses returns a nil slice for operations with no success responses.
+func NoSuccesses() []Success[struct{}] { return nil }
 
 // RegisterExamples adds all stored examples to the API components.
 func RegisterExamples(api huma.API) {
@@ -185,8 +334,13 @@ func RegisterSchemas(api huma.API) {
 	if api.OpenAPI().Components.Schemas == nil {
 		api.OpenAPI().Components.Schemas = huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer)
 	}
+	dst := api.OpenAPI().Components.Schemas
 	for n, s := range registry.Map() {
-		api.OpenAPI().Components.Schemas.Map()[n] = s
+		ref := "#/components/schemas/" + n
+		if t := registry.TypeFromRef(ref); t != nil {
+			dst.Schema(t, true, n)
+		}
+		dst.Map()[n] = s
 	}
 }
 
@@ -196,23 +350,73 @@ func RegisterSchemas(api huma.API) {
 func ResponseMap[T any](op string, successes []Success[T], errs []*code.Code) map[string]*huma.Response {
 	responses := map[string]*huma.Response{}
 	t := reflect.TypeOf((*T)(nil)).Elem()
-	typed := !(t.Kind() == reflect.Interface && t.NumMethod() == 0) && !(t.Kind() == reflect.Struct && t.NumField() == 0)
+	isEmptyInterface := t.Kind() == reflect.Interface && t.NumMethod() == 0
+	isEmptyStruct := t.Kind() == reflect.Struct && t.NumField() == 0
+	typed := !isEmptyInterface && !isEmptyStruct
 	var typedSchema *huma.Schema
 	if typed {
-		typedSchema = huma.SchemaFromType(registry, reflect.TypeOf(response.GenericResponse[T]{}))
+		// Register a schema for GenericResponse[T] that composes the
+		// BaseResponse metadata with the typed body using `allOf`.
+		grType := reflect.TypeOf(response.GenericResponse[T]{})
+		typedSchema = registry.Schema(grType, true, "")
+		name := strings.TrimPrefix(typedSchema.Ref, "#/components/schemas/")
+
+		base := &huma.Schema{Ref: baseResponseSchema.Ref}
+		body := &huma.Schema{
+			Type: huma.TypeObject,
+			Properties: map[string]*huma.Schema{
+				"body": registry.Schema(t, true, ""),
+			},
+			Required: []string{"body"},
+		}
+
+		allOf := []*huma.Schema{base, body}
+		registry.Map()[name] = &huma.Schema{
+			Type:       huma.TypeObject,
+			Properties: map[string]*huma.Schema{},
+			AllOf:      allOf,
+		}
+		// Ensure subsequent uses reference the component definition.
+		typedSchema = &huma.Schema{Ref: typedSchema.Ref}
+	}
+	var bodyExample any
+	if typed && len(successes) > 0 {
+		bodyExample = successes[0].Body
 	}
 	for _, s := range successes {
 		if s.Status == 0 {
 			s.Status = http.StatusOK
 		}
+		ct := s.ContentType
+		if ct == "" {
+			ct = "application/json"
+		}
 		if s.Status == http.StatusNoContent {
-			responses[fmt.Sprintf("%d", s.Status)] = &huma.Response{Description: s.Description}
+			responses[fmt.Sprintf("%d", s.Status)] = &huma.Response{Description: s.Description, Headers: s.Headers}
+			continue
+		}
+		if ct != "application/json" {
+			st := reflect.TypeOf(s.Body)
+			typeName := typeLabel(st)
+			base := fmt.Sprintf("%s-%s-%d", op, typeName, s.Status)
+			responses[fmt.Sprintf("%d", s.Status)] = &huma.Response{
+				Description: s.Description,
+				Headers:     s.Headers,
+				Content: map[string]*huma.MediaType{
+					ct: {
+						Schema: registry.Schema(st, true, ""),
+						Examples: map[string]*huma.Example{
+							"success": registerExample(base, s.Body),
+						},
+					},
+				},
+			}
 			continue
 		}
 		schema := typedSchema
 		var example any
 		if typed {
-			example = success[T](s.Body, s.Status)
+			example = success(s.Body, s.Status)
 		} else {
 			// treat as a BaseResponse without a body
 			schema = baseResponseSchema
@@ -222,13 +426,11 @@ func ResponseMap[T any](op string, successes []Success[T], errs []*code.Code) ma
 				ReturnMessage: ex.ReturnMessage,
 			}
 		}
-		typeName := strings.TrimPrefix(t.String(), "[]")
-		if typeName == "interface {}" || typeName == "struct {}" {
-			typeName = "any"
-		}
-		base := fmt.Sprintf("%s-%s-%d", op, strings.TrimPrefix(typeName, "*"), s.Status)
-		responses[fmt.Sprintf("%d", s.Status)] = &huma.Response{
+		typeName := typeLabel(t)
+		base := fmt.Sprintf("%s-%s-%d", op, typeName, s.Status)
+		r := &huma.Response{
 			Description: s.Description,
+			Headers:     s.Headers,
 			Content: map[string]*huma.MediaType{
 				"application/json": {
 					Schema: schema,
@@ -241,19 +443,46 @@ func ResponseMap[T any](op string, successes []Success[T], errs []*code.Code) ma
 				},
 			},
 		}
+		addSchemaHeader(r, schema)
+		responses[fmt.Sprintf("%d", s.Status)] = r
 	}
+	// count error messages to detect duplicates
+	msgCounts := map[string]int{}
 	for _, e := range errs {
-		name := fmt.Sprintf("error-%d", e.InternalCode)
-		responses[fmt.Sprintf("%d", e.HTTPCode)] = &huma.Response{
-			Description: e.Message,
-			Content: map[string]*huma.MediaType{
-				"application/problem+json": {
-					Schema: problemDetailSchema,
-					Examples: map[string]*huma.Example{
-						name: registerExample(name, exampleError(e)),
+		msgCounts[e.Message]++
+	}
+
+	for _, e := range errs {
+		key := e.Message
+		if msgCounts[e.Message] > 1 {
+			key = fmt.Sprintf("%s - %d", e.Message, e.InternalCode)
+		}
+		comp := fmt.Sprintf("error-%d", e.InternalCode)
+		codeKey := fmt.Sprintf("%d", e.HTTPCode)
+		r, ok := responses[codeKey]
+		if !ok {
+			r = &huma.Response{
+				Description: e.Message,
+				Content: map[string]*huma.MediaType{
+					"application/problem+json": {
+						Schema:   problemDetailSchema,
+						Examples: map[string]*huma.Example{},
 					},
 				},
-			},
+			}
+			addSchemaHeader(r, problemDetailSchema)
+			responses[codeKey] = r
+		}
+		mt := r.Content["application/problem+json"]
+		mt.Examples[key] = registerExample(comp, exampleError(e))
+	}
+	if typed && bodyExample != nil {
+		bs := registry.Schema(t, true, "")
+		if bs.Ref != "" {
+			name := strings.TrimPrefix(bs.Ref, "#/components/schemas/")
+			if schema := registry.Map()[name]; schema != nil && len(schema.Examples) == 0 {
+				schema.Examples = []any{bodyExample}
+			}
 		}
 	}
 	return responses
@@ -337,7 +566,7 @@ func inferFrom(pkgPath, fnName string, visited map[string]bool, codes map[string
 			if !ok || fd.Name.Name != fnName {
 				continue
 			}
-			inspectFunc(pkgPath, fd, pkg.TypesInfo, visited, codes)
+			inspectFunc(fd, pkg.TypesInfo, visited, codes)
 			return
 		}
 		_ = i
@@ -375,7 +604,7 @@ func loadPackage(pkgPath string) *packages.Package {
 
 // inspectFunc walks the given function body collecting error codes and
 // recursively following calls to other project functions.
-func inspectFunc(pkgPath string, decl *ast.FuncDecl, info *types.Info, visited map[string]bool, codes map[string]*code.Code) {
+func inspectFunc(decl *ast.FuncDecl, info *types.Info, visited map[string]bool, codes map[string]*code.Code) {
 	if decl == nil || decl.Body == nil {
 		return
 	}
@@ -401,7 +630,9 @@ func inspectFunc(pkgPath string, decl *ast.FuncDecl, info *types.Info, visited m
 			switch fun := n.Fun.(type) {
 			case *ast.SelectorExpr:
 				if sel := info.Selections[fun]; sel != nil {
-					obj = sel.Obj().(*types.Func)
+					if f, ok := sel.Obj().(*types.Func); ok {
+						obj = f
+					}
 				}
 			case *ast.Ident:
 				if o := info.Uses[fun]; o != nil {

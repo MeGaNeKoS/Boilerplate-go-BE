@@ -2,11 +2,18 @@ package logger
 
 import (
 	"io"
+	stdlog "log"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+)
+
+const (
+	maxReopenRetries  = 50
+	initialRetryDelay = 100 * time.Millisecond
+	maxRetryDelay     = 5 * time.Second
 )
 
 func (c *loggerCore) startWatchers() {
@@ -17,10 +24,14 @@ func (c *loggerCore) startWatchers() {
 	for _, p := range paths {
 		w, err := fsnotify.NewWatcher()
 		if err != nil {
+			stdlog.Printf("logger: failed to create watcher for %s: %v", p, err)
 			continue
 		}
 		if err := w.Add(filepath.Dir(p)); err != nil {
-			_ = w.Close()
+			stdlog.Printf("logger: failed to watch directory for %s: %v", p, err)
+			if cerr := w.Close(); cerr != nil {
+				stdlog.Printf("logger: failed to close watcher: %v", cerr)
+			}
 			continue
 		}
 		c.watchers = append(c.watchers, w)
@@ -50,22 +61,34 @@ func (c *loggerCore) reopenFile(path string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for {
+	delay := initialRetryDelay
+	for attempt := 0; attempt < maxReopenRetries; attempt++ {
 		f, err := openLogFile(path)
 		if err != nil {
-			time.Sleep(100 * time.Millisecond)
+			if attempt < maxReopenRetries-1 {
+				time.Sleep(delay)
+				delay *= 2
+				if delay > maxRetryDelay {
+					delay = maxRetryDelay
+				}
+			}
 			continue
 		}
-		if filepath.Clean(path) == filepath.Clean(c.logFilePath) {
+		cleanPath := filepath.Clean(path)
+		if cleanPath == filepath.Clean(c.logFilePath) {
 			if c.logFile != nil {
-				_ = c.logFile.Close()
+				if cerr := c.logFile.Close(); cerr != nil {
+					stdlog.Printf("logger: failed to close old log file: %v", cerr)
+				}
 			}
 			c.logFile = f
 		} else {
 			for lvl, p := range c.levelFilePath {
-				if filepath.Clean(p) == filepath.Clean(path) {
+				if filepath.Clean(p) == cleanPath {
 					if lf := c.levelFile[lvl]; lf != nil && lf != c.logFile {
-						_ = lf.Close()
+						if cerr := lf.Close(); cerr != nil {
+							stdlog.Printf("logger: failed to close old level file: %v", cerr)
+						}
 					}
 					c.levelFile[lvl] = f
 					break
@@ -75,6 +98,7 @@ func (c *loggerCore) reopenFile(path string) {
 		c.rebuildLoggers()
 		return
 	}
+	stdlog.Printf("logger: failed to reopen %s after %d retries", path, maxReopenRetries)
 }
 
 func openLogFile(path string) (*os.File, error) {

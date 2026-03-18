@@ -32,13 +32,17 @@ func RunMigrations(path string) error {
 		var dirty migrate.ErrDirty
 		if errors.As(err, &dirty) {
 			// clear dirty flag so further operations can proceed
-			if forceErr := m.Force(int(dirty.Version)); forceErr != nil {
+			if forceErr := m.Force(dirty.Version); forceErr != nil {
 				return fmt.Errorf("force dirty: %w", forceErr)
 			}
-			if strategy == enums.DirtyStrategyRetry {
+			switch strategy {
+			case enums.DirtyStrategyRetry:
+				// Roll back the failed migration, then re-run all pending.
 				if stepErr := m.Steps(-1); stepErr != nil {
 					return fmt.Errorf("rollback dirty: %w", stepErr)
 				}
+			case enums.DirtyStrategySkip:
+				// Accept the dirty version as-is and continue forward.
 			}
 			if err = m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 				return fmt.Errorf("migrate up after force: %w", err)

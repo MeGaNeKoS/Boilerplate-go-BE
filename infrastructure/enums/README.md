@@ -9,8 +9,3 @@ The folder currently includes:
 - `DirtyStrategy` – controls how database migrations handle dirty states.
 - `KafkaCode` – names of error codes used in Kafka responses.
 
-Run all enum tests with:
-
-```bash
-go test ./infrastructure/enums/...
-```

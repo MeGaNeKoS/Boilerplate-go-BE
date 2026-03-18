@@ -7,7 +7,6 @@ toolchain go1.24.3
 require (
 	github.com/bouk/monkey v1.0.1
 	github.com/coreos/go-systemd/v22 v22.5.0
-	github.com/danielgtaylor/huma/v2 v2.34.1
 	github.com/doug-martin/goqu/v9 v9.19.0
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/go-chi/chi/v5 v5.2.2
@@ -28,16 +27,16 @@ require (
 	bou.ke/monkey v1.0.2 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
-	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	golang.org/x/mod v0.25.0 // indirect
 	golang.org/x/sync v0.15.0 // indirect
-	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
+	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/DATA-DOG/go-sqlmock v1.5.0
+	github.com/danielgtaylor/huma/v2 v2.34.1
 	github.com/gabriel-vasile/mimetype v1.4.9 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1

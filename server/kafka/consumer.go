@@ -110,14 +110,24 @@ func (c *Consumer) handleMessage(ctx context.Context, m kafka.Message) (err erro
 		}
 	}
 	if parentID == "" {
-		id, _ := utils.UniqueIdByTime(86400)
+		id, idErr := utils.UniqueIdByTime(86400)
+		if idErr != nil {
+			return fmt.Errorf("failed to generate parent ID: %w", idErr)
+		}
 		parentID = "-" + id
 	}
 
 	reqLog := utils.GetLoggerFromContext(ctx)
 	if reqLog == nil {
-		childId, _ := utils.UniqueIdByTime(86400)
-		reqLog, _ = logger.NewLogger(config.Cfg.LogTarget, parentID, childId)
+		childId, idErr := utils.UniqueIdByTime(86400)
+		if idErr != nil {
+			return fmt.Errorf("failed to generate child ID: %w", idErr)
+		}
+		var logErr error
+		reqLog, logErr = logger.NewLogger(config.Cfg.LogTarget, parentID, childId)
+		if logErr != nil {
+			return fmt.Errorf("failed to create logger: %w", logErr)
+		}
 	}
 
 	ctx = utils.SetTokenCtx(ctx, utils.SecureString(token))
@@ -165,20 +175,25 @@ func (c *Consumer) handleMessage(ctx context.Context, m kafka.Message) (err erro
 	}
 
 	if replyTo != "" && corrID != "" {
-		respData, err := json.Marshal(respPayload)
-		if err != nil {
-			reqLog.ErrorF("marshal reply: %v", err)
-		} else {
-			writer := &kafka.Writer{Addr: kafka.TCP(config.Cfg.Kafka.Brokers...), Topic: replyTo}
-			respMsg := kafka.Message{
-				Key:     []byte(fmt.Sprintf("%d", ev.ID)),
-				Value:   respData,
-				Headers: []kafka.Header{{Key: "correlation-id", Value: []byte(corrID)}},
+		respData, marshalErr := json.Marshal(respPayload)
+		if marshalErr != nil {
+			reqLog.ErrorF("marshal reply: %v", marshalErr)
+			return fmt.Errorf("marshal reply: %w", marshalErr)
+		}
+		writer := &kafka.Writer{Addr: kafka.TCP(config.Cfg.Kafka.Brokers...), Topic: replyTo}
+		defer func() {
+			if closeErr := writer.Close(); closeErr != nil {
+				reqLog.ErrorF("close reply writer: %v", closeErr)
 			}
-			if err := writer.WriteMessages(ctx, respMsg); err != nil {
-				reqLog.ErrorF("send reply: %v", err)
-			}
-			writer.Close()
+		}()
+		respMsg := kafka.Message{
+			Key:     []byte(fmt.Sprintf("%d", ev.ID)),
+			Value:   respData,
+			Headers: []kafka.Header{{Key: "correlation-id", Value: []byte(corrID)}},
+		}
+		if writeErr := writer.WriteMessages(ctx, respMsg); writeErr != nil {
+			reqLog.ErrorF("send reply: %v", writeErr)
+			return fmt.Errorf("send reply: %w", writeErr)
 		}
 	}
 	return nil

@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -66,7 +68,12 @@ func TestUploadFileError(t *testing.T) {
 func TestDownloadFile(t *testing.T) {
 	cwd, _ := os.Getwd()
 	_ = os.Chdir("../../..")
-	defer os.Chdir(cwd)
+	defer func(dir string) {
+		err := os.Chdir(dir)
+		if err != nil {
+			t.Fatalf("failed to change directory: %v", err)
+		}
+	}(cwd)
 	expected, err := os.ReadFile("public/public.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -81,8 +88,12 @@ func TestDownloadFile(t *testing.T) {
 	if !bytes.Equal(rec.Body.Bytes(), expected) {
 		t.Fatalf("body %s", rec.Body.Bytes())
 	}
-	if resp.GetHeaders().Get("Content-Disposition") == "" {
+	disp := resp.GetHeaders().Get("Content-Disposition")
+	if disp == "" {
 		t.Fatalf("missing disposition")
+	}
+	if !strings.Contains(disp, `filename="`) {
+		t.Fatalf("filename not quoted in Content-Disposition: %s", disp)
 	}
 	if resp.GetHeaders().Get("Content-Type") != "text/plain; charset=utf-8" {
 		t.Fatalf("content type %q", resp.GetHeaders().Get("Content-Type"))
@@ -93,12 +104,18 @@ func TestDownloadFileNotFound(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
 	cwd, _ := os.Getwd()
 	_ = os.Chdir("../../..")
-	defer os.Chdir(cwd)
+	defer func(dir string) {
+		err := os.Chdir(dir)
+		if err != nil {
+			t.Fatalf("failed to change directory: %v", err)
+		}
+	}(cwd)
 	_, err := DownloadFile(context.Background(), &files.DownloadInput{Name: "missing.txt"})
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	if herr, ok := err.(huma.StatusError); !ok || herr.GetStatus() != http.StatusNotFound {
+	var herr huma.StatusError
+	if !errors.As(err, &herr) || herr.GetStatus() != http.StatusNotFound {
 		t.Fatalf("status %v", err)
 	}
 }
@@ -107,12 +124,13 @@ func TestDownloadFileInternalError(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
 	cwd, _ := os.Getwd()
 	_ = os.Chdir("../../..")
-	defer os.Chdir(cwd)
+	defer func() { _ = os.Chdir(cwd) }()
 	_, err := DownloadFile(context.Background(), &files.DownloadInput{Name: ""})
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	if herr, ok := err.(huma.StatusError); !ok || herr.GetStatus() != http.StatusInternalServerError {
+	var herr huma.StatusError
+	if !errors.As(err, &herr) || herr.GetStatus() != http.StatusInternalServerError {
 		t.Fatalf("status %v", err)
 	}
 }
@@ -121,12 +139,22 @@ func TestDownloadFileMimeFallback(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
 	cwd, _ := os.Getwd()
 	_ = os.Chdir("../../..")
-	defer os.Chdir(cwd)
+	defer func(dir string) {
+		err := os.Chdir(dir)
+		if err != nil {
+			t.Fatalf("failed to change directory: %v", err)
+		}
+	}(cwd)
 	path := filepath.Join("public", "nomime")
 	if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(path)
+	defer func(name string) {
+		err := os.Remove(name)
+		if err != nil {
+			t.Fatalf("failed to remove file %s: %v", name, err)
+		}
+	}(path)
 	resp, err := DownloadFile(context.Background(), &files.DownloadInput{Name: "nomime"})
 	if err != nil {
 		t.Fatal(err)

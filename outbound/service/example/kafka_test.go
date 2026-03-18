@@ -94,7 +94,7 @@ func TestPublishItemAndWait(t *testing.T) {
 	if len(sw.msgs) != 1 {
 		t.Fatalf("message not written")
 	}
-	if len(sr.msg.Headers) != 1 || string(sr.msg.Headers[0].Key) != "correlation-id" {
+	if len(sr.msg.Headers) != 1 || sr.msg.Headers[0].Key != "correlation-id" {
 		t.Fatalf("correlation id header not copied")
 	}
 }

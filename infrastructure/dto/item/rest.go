@@ -15,6 +15,7 @@ type IDPath struct {
 type ListItemsInput struct {
 	Debug string `query:"debug" internal:"true"`
 	Token string `header:"X-Debug" internal:"true"`
+	Limit int    `query:"limit" minimum:"1" maximum:"100" example:"10"`
 }
 
 // UpdateItemInput defines the payload for updating an item.

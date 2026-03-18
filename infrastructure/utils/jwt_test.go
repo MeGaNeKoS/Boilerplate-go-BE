@@ -146,14 +146,20 @@ func TestNewJWTServiceErrors(t *testing.T) {
 	}
 
 	badPriv := filepath.Join(dir, "badpriv.pem")
-	os.WriteFile(badPriv, []byte("BAD"), 0600)
+	err := os.WriteFile(badPriv, []byte("BAD"), 0600)
+	if err != nil {
+		return
+	}
 	config.Cfg.Server.JWT.PrivateKey = badPriv
 	if _, err := newJWTService(true, false); err == nil || !strings.Contains(err.Error(), "parse private key") {
 		t.Fatalf("expected parse private key error")
 	}
 
 	badPub := filepath.Join(dir, "badpub.pem")
-	os.WriteFile(badPub, []byte("BAD"), 0600)
+	err = os.WriteFile(badPub, []byte("BAD"), 0600)
+	if err != nil {
+		return
+	}
 	config.Cfg.Server.JWT.PublicKey = badPub
 	if _, err := newJWTService(false, true); err == nil || !strings.Contains(err.Error(), "parse public key") {
 		t.Fatalf("expected parse public key error")
@@ -224,7 +230,7 @@ func TestParseJWTEnvWrongKind(t *testing.T) {
 		Environment interface{}
 		jwt.RegisteredClaims
 	}
-	if err := svc.ParseJWT(token, &ifaceEnv{}); err == nil || !strings.Contains(err.Error(), "environment field is not a string") {
+	if err := svc.ParseJWT(token, &ifaceEnv{}); err == nil || !strings.Contains(err.Error(), "no string Environment field") {
 		t.Fatalf("expected env kind error, got %v", err)
 	}
 }
@@ -253,8 +259,88 @@ func TestParseJWTMissingField(t *testing.T) {
 	svc := GetJWTService()
 	token, _ := svc.SignJWT(nil)
 	type noEnv struct{ jwt.RegisteredClaims }
-	if err := svc.ParseJWT(token, &noEnv{}); err == nil || !strings.Contains(err.Error(), "environment field is missing") {
+	if err := svc.ParseJWT(token, &noEnv{}); err == nil || !strings.Contains(err.Error(), "no string Environment field") {
 		t.Fatalf("expected env missing error, got %v", err)
+	}
+}
+
+// envClaims implements the environmentClaims interface used inside ParseJWT.
+type envClaims struct {
+	Environment string `json:"environment"`
+	jwt.RegisteredClaims
+}
+
+func (e *envClaims) GetEnvironment() string { return e.Environment }
+
+func TestParseJWTEnvironmentClaimsInterface(t *testing.T) {
+	dir := t.TempDir()
+	priv, pub := writeKeyFiles(t, dir)
+	config.Cfg = &config.Config{AppName: "APP", Server: config.ServerConfig{Environment: "dev", JWT: config.JWTConfig{PrivateKey: priv, PublicKey: pub}}}
+	jwtInstance = nil
+	jwtOnce = sync.Once{}
+	if err := InitializeJWTService(true, true); err != nil {
+		t.Fatalf("init err: %v", err)
+	}
+	svc := GetJWTService()
+	token, err := svc.SignJWT(nil)
+	if err != nil {
+		t.Fatalf("sign err: %v", err)
+	}
+
+	// Matching environment via the environmentClaims interface.
+	claims := &envClaims{}
+	if err := svc.ParseJWT(token, claims); err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if claims.Environment != "dev" {
+		t.Fatalf("expected dev, got %s", claims.Environment)
+	}
+}
+
+func TestParseJWTEnvironmentClaimsInterfaceMismatch(t *testing.T) {
+	dir := t.TempDir()
+	priv, pub := writeKeyFiles(t, dir)
+	config.Cfg = &config.Config{AppName: "APP", Server: config.ServerConfig{Environment: "dev", JWT: config.JWTConfig{PrivateKey: priv, PublicKey: pub}}}
+	jwtInstance = nil
+	jwtOnce = sync.Once{}
+	if err := InitializeJWTService(true, true); err != nil {
+		t.Fatalf("init err: %v", err)
+	}
+	svc := GetJWTService()
+	token, err := svc.SignJWT(nil)
+	if err != nil {
+		t.Fatalf("sign err: %v", err)
+	}
+
+	// Change the expected environment so the interface path hits the mismatch error.
+	config.Cfg.Server.Environment = "prod"
+	claims := &envClaims{}
+	if err := svc.ParseJWT(token, claims); err == nil || !strings.Contains(err.Error(), "invalid environment") {
+		t.Fatalf("expected environment mismatch error, got %v", err)
+	}
+}
+
+func TestParseJWTReflectionEnvMismatch(t *testing.T) {
+	dir := t.TempDir()
+	priv, pub := writeKeyFiles(t, dir)
+	config.Cfg = &config.Config{AppName: "APP", Server: config.ServerConfig{Environment: "dev", JWT: config.JWTConfig{PrivateKey: priv, PublicKey: pub}}}
+	jwtInstance = nil
+	jwtOnce = sync.Once{}
+	if err := InitializeJWTService(true, true); err != nil {
+		t.Fatalf("init err: %v", err)
+	}
+	svc := GetJWTService()
+	token, err := svc.SignJWT(nil)
+	if err != nil {
+		t.Fatalf("sign err: %v", err)
+	}
+
+	// Use Claims (no GetEnvironment method) so reflection path is used.
+	// The signed token has environment "dev", change config to trigger mismatch.
+	config.Cfg.Server.Environment = "staging"
+	claims := &Claims{}
+	if err := svc.ParseJWT(token, claims); err == nil || !strings.Contains(err.Error(), "invalid environment") {
+		t.Fatalf("expected environment mismatch error, got %v", err)
 	}
 }
 

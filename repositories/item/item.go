@@ -44,15 +44,15 @@ func (r *itemRepository) Create(ctx context.Context, item *models.Item) error {
 	// Run the insert inside its own transaction for consistency.
 	var id int64
 	err = r.db.WithTransaction(ctx, func(txCtx context.Context) error {
-		res, err := r.db.ExecContext(txCtx, sqlStr, args...)
-		if err != nil {
-			r.log.ErrorF("Failed to execute insert: %v", err)
-			return err
+		res, execErr := r.db.ExecContext(txCtx, sqlStr, args...)
+		if execErr != nil {
+			r.log.ErrorF("Failed to execute insert: %v", execErr)
+			return execErr
 		}
-		lastID, err := res.LastInsertId()
-		if err != nil {
-			r.log.ErrorF("Failed to get last insert ID: %v", err)
-			return err
+		lastID, idErr := res.LastInsertId()
+		if idErr != nil {
+			r.log.ErrorF("Failed to get last insert ID: %v", idErr)
+			return idErr
 		}
 		id = lastID
 		return nil
@@ -132,11 +132,11 @@ func (r *itemRepository) Update(ctx context.Context, item *models.Item) error {
 	}
 	// Ensure the update is executed within a transaction.
 	err = r.db.WithTransaction(ctx, func(txCtx context.Context) error {
-		_, err := r.db.ExecContext(txCtx, sqlStr, args...)
-		if err != nil {
-			r.log.ErrorF("Failed to execute update: %v", err)
+		_, execErr := r.db.ExecContext(txCtx, sqlStr, args...)
+		if execErr != nil {
+			r.log.ErrorF("Failed to execute update: %v", execErr)
 		}
-		return err
+		return execErr
 	})
 	return err
 }
@@ -152,11 +152,11 @@ func (r *itemRepository) Delete(ctx context.Context, id int) error {
 	}
 	// Execute the delete statement inside a transaction.
 	err = r.db.WithTransaction(ctx, func(txCtx context.Context) error {
-		_, err := r.db.ExecContext(txCtx, sqlStr, args...)
-		if err != nil {
-			r.log.ErrorF("Failed to execute delete: %v", err)
+		_, execErr := r.db.ExecContext(txCtx, sqlStr, args...)
+		if execErr != nil {
+			r.log.ErrorF("Failed to execute delete: %v", execErr)
 		}
-		return err
+		return execErr
 	})
 	return err
 }

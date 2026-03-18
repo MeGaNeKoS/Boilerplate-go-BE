@@ -31,10 +31,6 @@ func (errItemRepo) Get(context.Context, int) (*models.Item, error) { return nil,
 func (errItemRepo) Update(context.Context, *models.Item) error     { return errors.New("err") }
 func (errItemRepo) Delete(context.Context, int) error              { return errors.New("err") }
 
-type errRepo struct{}
-
-func (errRepo) GetItemRepository() repoitem.Repository { return errItemRepo{} }
-
 func TestHandleMessageErrorBranches(t *testing.T) {
 	config.Cfg = &config.Config{Kafka: config.KafkaConfig{Brokers: []string{"b"}}, LogTarget: config.LogConfig{Path: t.TempDir(), FileName: "app.log"}}
 
@@ -140,8 +136,8 @@ func TestHandleMessageReplyMarshalError(t *testing.T) {
 
 	msg := kafka.Message{Value: val, Headers: []kafka.Header{{Key: "reply-to", Value: []byte("r")}, {Key: "correlation-id", Value: []byte("c")}}}
 	ctx := utils.SetLoggerToContext(context.Background(), stubLogger{})
-	if err := c.HandleMessageTest(ctx, msg); err != nil {
-		t.Fatalf("handleMessage: %v", err)
+	if err := c.HandleMessageTest(ctx, msg); err == nil {
+		t.Fatal("expected marshal reply error")
 	}
 }
 
@@ -167,11 +163,35 @@ func TestHandleMessageReplySendError(t *testing.T) {
 	val, _ := json.Marshal(models.Item{Name: "b"})
 	msg := kafka.Message{Value: val, Headers: []kafka.Header{{Key: "reply-to", Value: []byte("r")}, {Key: "correlation-id", Value: []byte("c")}}}
 	ctx := utils.SetLoggerToContext(context.Background(), stubLogger{})
-	if err := c.HandleMessageTest(ctx, msg); err != nil {
-		t.Fatalf("handleMessage: %v", err)
+	if err := c.HandleMessageTest(ctx, msg); err == nil {
+		t.Fatal("expected send reply error")
 	}
 	if !called {
 		t.Fatal("writer not called")
+	}
+}
+
+func TestHandleMessageReplyWriterCloseError(t *testing.T) {
+	config.Cfg = &config.Config{Kafka: config.KafkaConfig{Brokers: []string{"b"}}, LogTarget: config.LogConfig{Path: t.TempDir(), FileName: "app.log"}}
+
+	patchRepo := monkey.Patch(repo.NewRepository, func(logger.Logger, db.DB) repo.Impl { return &repo.Repository{} })
+	t.Cleanup(patchRepo.Unpatch)
+	monkey.PatchInstanceMethod(reflect.TypeOf(&repo.Repository{}), "GetItemRepository", func(*repo.Repository) repoitem.Repository { return &stubItemRepo{} })
+	monkey.Patch(outbound.NewOutbound, func(logger.Logger) outbound.Impl { return stubOutbound{} })
+	monkey.PatchInstanceMethod(reflect.TypeOf(&kafka.Writer{}), "WriteMessages", func(_ *kafka.Writer, _ context.Context, _ ...kafka.Message) error { return nil })
+	monkey.PatchInstanceMethod(reflect.TypeOf(&kafka.Writer{}), "Close", func(*kafka.Writer) error { return errors.New("close-err") })
+	monkey.Patch(utils.UniqueIdByTime, func(uint64) (string, error) { return "id", nil })
+	monkey.Patch(logger.NewLogger, func(cfg config.LogConfig, p, c string) (logger.Logger, error) { return stubLogger{}, nil })
+	defer monkey.UnpatchAll()
+
+	c := NewTestConsumer(stubLogger{}, nil)
+	val, _ := json.Marshal(models.Item{Name: "c"})
+	msg := kafka.Message{Value: val, Headers: []kafka.Header{{Key: "reply-to", Value: []byte("r")}, {Key: "correlation-id", Value: []byte("c")}}}
+	ctx := utils.SetLoggerToContext(context.Background(), stubLogger{})
+	// The reply write succeeds but Close fails; handleMessage should still return nil
+	// because the close error is only logged, not returned.
+	if err := c.HandleMessageTest(ctx, msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -201,6 +221,72 @@ func TestConsumerStartHandlerError(t *testing.T) {
 	err := c.Start(context.Background())
 	if err == nil || err.Error() != "done" {
 		t.Fatalf("unexpected err %v", err)
+	}
+}
+
+func TestHandleMessageParentIDGenerationError(t *testing.T) {
+	config.Cfg = &config.Config{LogTarget: config.LogConfig{Path: t.TempDir(), FileName: "app.log"}}
+
+	monkey.Patch(utils.UniqueIdByTime, func(uint64) (string, error) {
+		return "", errors.New("rand fail")
+	})
+	defer monkey.UnpatchAll()
+
+	c := NewTestConsumer(stubLogger{}, nil)
+	ev := ItemEvent{Action: "create", Item: models.Item{Name: "x"}}
+	val, _ := json.Marshal(ev)
+	// No parent-id header, so UniqueIdByTime is called for parent
+	msg := kafka.Message{Value: val}
+	ctx := utils.SetLoggerToContext(context.Background(), stubLogger{})
+	err := c.HandleMessageTest(ctx, msg)
+	if err == nil {
+		t.Fatal("expected error for parent ID generation failure")
+	}
+}
+
+func TestHandleMessageChildIDGenerationError(t *testing.T) {
+	config.Cfg = &config.Config{LogTarget: config.LogConfig{Path: t.TempDir(), FileName: "app.log"}}
+
+	callCount := 0
+	monkey.Patch(utils.UniqueIdByTime, func(uint64) (string, error) {
+		callCount++
+		if callCount == 1 {
+			return "pid", nil
+		}
+		return "", errors.New("child fail")
+	})
+	defer monkey.UnpatchAll()
+
+	c := NewTestConsumer(stubLogger{}, nil)
+	ev := ItemEvent{Action: "create", Item: models.Item{Name: "x"}}
+	val, _ := json.Marshal(ev)
+	// No parent-id header, no logger in context
+	msg := kafka.Message{Value: val}
+	err := c.HandleMessageTest(context.Background(), msg)
+	if err == nil {
+		t.Fatal("expected error for child ID generation failure")
+	}
+}
+
+func TestHandleMessageLoggerCreationError(t *testing.T) {
+	config.Cfg = &config.Config{LogTarget: config.LogConfig{Path: t.TempDir(), FileName: "app.log"}}
+
+	monkey.Patch(utils.UniqueIdByTime, func(uint64) (string, error) {
+		return "id", nil
+	})
+	monkey.Patch(logger.NewLogger, func(cfg config.LogConfig, p, c string) (logger.Logger, error) {
+		return nil, errors.New("logger fail")
+	})
+	defer monkey.UnpatchAll()
+
+	c := NewTestConsumer(stubLogger{}, nil)
+	ev := ItemEvent{Action: "create", Item: models.Item{Name: "x"}}
+	val, _ := json.Marshal(ev)
+	// No parent-id header, no logger in context
+	msg := kafka.Message{Value: val}
+	err := c.HandleMessageTest(context.Background(), msg)
+	if err == nil {
+		t.Fatal("expected error for logger creation failure")
 	}
 }
 

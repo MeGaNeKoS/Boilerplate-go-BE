@@ -59,8 +59,16 @@ func TestHandleRunsCommand(t *testing.T) {
 		t.Fatalf("write script: %v", err)
 	}
 	oldPath := os.Getenv("PATH")
-	os.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath)
-	defer os.Setenv("PATH", oldPath)
+	err := os.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath)
+	if err != nil {
+		return
+	}
+	defer func(key, value string) {
+		err := os.Setenv(key, value)
+		if err != nil {
+			return
+		}
+	}("PATH", oldPath)
 
 	c1, c2 := net.Pipe()
 	var wg sync.WaitGroup
@@ -72,7 +80,7 @@ func TestHandleRunsCommand(t *testing.T) {
 	if _, err := c2.Write([]byte("restart svc.service\n")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	c2.Close()
+	_ = c2.Close()
 	wg.Wait()
 	data, err := os.ReadFile(argsFile)
 	if err != nil {
@@ -99,8 +107,8 @@ func TestHandleStopCommand(t *testing.T) {
 		t.Fatalf("write script: %v", err)
 	}
 	oldPath := os.Getenv("PATH")
-	os.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath)
-	defer os.Setenv("PATH", oldPath)
+	_ = os.Setenv("PATH", dir+string(os.PathListSeparator)+oldPath)
+	defer func() { _ = os.Setenv("PATH", oldPath) }()
 
 	c1, c2 := net.Pipe()
 	var wg sync.WaitGroup
@@ -109,7 +117,7 @@ func TestHandleStopCommand(t *testing.T) {
 	if _, err := c2.Write([]byte("stop svc.service\n")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	c2.Close()
+	_ = c2.Close()
 	wg.Wait()
 	data, err := os.ReadFile(argsFile)
 	if err != nil {
@@ -123,7 +131,7 @@ func TestHandleStopCommand(t *testing.T) {
 
 func TestHandleReadError(t *testing.T) {
 	c1, c2 := net.Pipe()
-	c2.Close() // trigger read error in handle
+	_ = c2.Close() // trigger read error in handle
 	handle(c1)
 }
 
@@ -135,8 +143,8 @@ func TestHandleEmptyService(t *testing.T) {
 		t.Fatalf("write script: %v", err)
 	}
 	oldPath := os.Getenv("PATH")
-	os.Setenv("PATH", dir+":"+oldPath)
-	defer os.Setenv("PATH", oldPath)
+	_ = os.Setenv("PATH", dir+":"+oldPath)
+	defer func() { _ = os.Setenv("PATH", oldPath) }()
 
 	c1, c2 := net.Pipe()
 	var wg sync.WaitGroup
@@ -145,7 +153,7 @@ func TestHandleEmptyService(t *testing.T) {
 	if _, err := c2.Write([]byte("\n")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	c2.Close()
+	_ = c2.Close()
 	wg.Wait()
 	if _, err := os.Stat(argsFile); !os.IsNotExist(err) {
 		t.Fatalf("expected no command execution, got file err=%v", err)
@@ -243,7 +251,7 @@ func TestListenCallsHandle(t *testing.T) {
 	monkey.Patch(os.Chmod, func(string, os.FileMode) error { return nil })
 	done := make(chan struct{})
 	monkey.Patch(handle, func(c net.Conn) {
-		c.Close()
+		_ = c.Close()
 		close(done)
 	})
 	l := &stubListener{}
@@ -252,7 +260,7 @@ func TestListenCallsHandle(t *testing.T) {
 		if first {
 			first = false
 			c1, c2 := net.Pipe()
-			c2.Close()
+			_ = c2.Close()
 			return c1, nil
 		}
 		panic("stop")
@@ -293,7 +301,7 @@ func TestHandleRestartWithTempService(t *testing.T) {
 	if _, err := c2.Write([]byte("restart main.service,tmp.service\n")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	c2.Close()
+	_ = c2.Close()
 	wg.Wait()
 
 	want := []string{
@@ -423,8 +431,8 @@ func TestHandleEnvTimeoutParseError(t *testing.T) {
 	)
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
-	os.Setenv("TEMP_SERVICE_ACTIVE_TIMEOUT", "bad")
-	defer os.Unsetenv("TEMP_SERVICE_ACTIVE_TIMEOUT")
+	_ = os.Setenv("TEMP_SERVICE_ACTIVE_TIMEOUT", "bad")
+	defer func() { _ = os.Unsetenv("TEMP_SERVICE_ACTIVE_TIMEOUT") }()
 
 	monkey.Patch(exec.Command, func(name string, args ...string) *exec.Cmd {
 		if len(args) > 0 && args[0] == "is-active" {
@@ -462,8 +470,8 @@ func TestHandleEnvTimeoutValue(t *testing.T) {
 	)
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
-	os.Setenv("TEMP_SERVICE_ACTIVE_TIMEOUT", "2")
-	defer os.Unsetenv("TEMP_SERVICE_ACTIVE_TIMEOUT")
+	_ = os.Setenv("TEMP_SERVICE_ACTIVE_TIMEOUT", "2")
+	defer func() { _ = os.Unsetenv("TEMP_SERVICE_ACTIVE_TIMEOUT") }()
 
 	monkey.Patch(exec.Command, func(name string, args ...string) *exec.Cmd {
 		if len(args) > 0 && args[0] == "is-active" {

@@ -37,7 +37,7 @@ Entire operations can be hidden from public docs by adding the internal tag
 routes.RouteDef{
     Method: http.MethodDelete,
     Path:   "/items/{id}",
-    Tags:   []string{"items", helpers.InternalTag()},
+    Tags:   []string{"items", utils.InternalTag()},
     // ...
 }
 ```

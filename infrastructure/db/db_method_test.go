@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
+	"os"
 	"project-template/infrastructure/config"
 	"reflect"
 	"strings"
@@ -35,7 +37,12 @@ func TestExecContextWithTx(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func(db *sql.DB) {
+		err := db.Close()
+		if err != nil {
+			return
+		}
+	}(db)
 
 	mock.ExpectBegin()
 	tx, _ := db.Begin()
@@ -54,7 +61,12 @@ func TestExecContextNoTx(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func(db *sql.DB) {
+		err := db.Close()
+		if err != nil {
+			return
+		}
+	}(db)
 
 	impl := &dbImpl{db: db}
 	ctx := context.Background()
@@ -91,7 +103,12 @@ func TestWithTransactionCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sqlDB.Close()
+	defer func(sqlDB *sql.DB) {
+		err := sqlDB.Close()
+		if err != nil {
+			return
+		}
+	}(sqlDB)
 	impl := &dbImpl{db: sqlDB}
 
 	mock.ExpectBegin()
@@ -116,7 +133,12 @@ func TestWithTransactionRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sqlDB.Close()
+	defer func(sqlDB *sql.DB) {
+		err := sqlDB.Close()
+		if err != nil {
+			return
+		}
+	}(sqlDB)
 	impl := &dbImpl{db: sqlDB}
 
 	mock.ExpectBegin()
@@ -138,7 +160,12 @@ func TestWithTransactionPanic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sqlDB.Close()
+	defer func(sqlDB *sql.DB) {
+		err := sqlDB.Close()
+		if err != nil {
+			return
+		}
+	}(sqlDB)
 	impl := &dbImpl{db: sqlDB}
 
 	mock.ExpectBegin()
@@ -147,8 +174,11 @@ func TestWithTransactionPanic(t *testing.T) {
 	err = impl.WithTransaction(context.Background(), func(ctx context.Context) error {
 		panic("boom")
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected error from panic, got nil")
+	}
+	if !strings.Contains(err.Error(), "panic in transaction") {
+		t.Fatalf("expected panic error, got: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -160,7 +190,12 @@ func TestBeginTx(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sqlDB.Close()
+	defer func(sqlDB *sql.DB) {
+		err := sqlDB.Close()
+		if err != nil {
+			return
+		}
+	}(sqlDB)
 	impl := &dbImpl{db: sqlDB}
 
 	mock.ExpectBegin()
@@ -182,7 +217,12 @@ func TestBeginTxError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sqlDB.Close()
+	defer func(sqlDB *sql.DB) {
+		err := sqlDB.Close()
+		if err != nil {
+			return
+		}
+	}(sqlDB)
 	impl := &dbImpl{db: sqlDB}
 
 	mock.ExpectBegin().WillReturnError(sql.ErrConnDone)
@@ -329,12 +369,68 @@ func TestPingAndCloseWithDB(t *testing.T) {
 	}
 }
 
+func TestLogErrorWithoutLogger(t *testing.T) {
+	// Exercise the else branch of logError (no logger set, falls back to stdlog).
+	impl := &dbImpl{}
+	var buf strings.Builder
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+	impl.logError("test error: %v", "detail")
+	if !strings.Contains(buf.String(), "test error: detail") {
+		t.Fatalf("expected log output, got %q", buf.String())
+	}
+}
+
+func TestLogInfoWithoutLogger(t *testing.T) {
+	impl := &dbImpl{}
+	var buf strings.Builder
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+	impl.logInfo("info msg: %s", "hello")
+	if !strings.Contains(buf.String(), "info msg: hello") {
+		t.Fatalf("expected log output, got %q", buf.String())
+	}
+}
+
+type errorCapLogger struct {
+	errorMsgs []string
+}
+
+func (e *errorCapLogger) Debug(string)                  {}
+func (e *errorCapLogger) DebugF(string, ...interface{}) {}
+func (e *errorCapLogger) Info(string)                    {}
+func (e *errorCapLogger) InfoF(string, ...interface{})  {}
+func (e *errorCapLogger) Warn(string)                    {}
+func (e *errorCapLogger) WarnF(string, ...interface{})  {}
+func (e *errorCapLogger) Error(string)                   {}
+func (e *errorCapLogger) ErrorF(format string, args ...interface{}) {
+	e.errorMsgs = append(e.errorMsgs, fmt.Sprintf(format, args...))
+}
+func (e *errorCapLogger) Fatal(string)                   {}
+func (e *errorCapLogger) FatalF(string, ...interface{}) {}
+func (e *errorCapLogger) ParentID() string               { return "" }
+func (e *errorCapLogger) ChildID() string                { return "" }
+
+func TestLogErrorWithLogger(t *testing.T) {
+	l := &errorCapLogger{}
+	impl := &dbImpl{logger: l}
+	impl.logError("something went wrong: %v", "oops")
+	if len(l.errorMsgs) != 1 || !strings.Contains(l.errorMsgs[0], "something went wrong: oops") {
+		t.Fatalf("expected logger.ErrorF to be called, got %v", l.errorMsgs)
+	}
+}
+
 func TestWithTransactionErrors(t *testing.T) {
 	sqlDB, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sqlDB.Close()
+	defer func(sqlDB *sql.DB) {
+		err := sqlDB.Close()
+		if err != nil {
+			return
+		}
+	}(sqlDB)
 	impl := &dbImpl{db: sqlDB}
 
 	// begin error
@@ -357,10 +453,10 @@ func TestWithTransactionErrors(t *testing.T) {
 		t.Fatalf("expected rollback error")
 	}
 
-	// panic rollback error should not be returned
+	// panic rollback error is logged, but the panic itself is returned as an error
 	mock.ExpectBegin()
 	mock.ExpectRollback().WillReturnError(errors.New("prb"))
-	if err := impl.WithTransaction(context.Background(), func(ctx context.Context) error { panic("boom") }); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := impl.WithTransaction(context.Background(), func(ctx context.Context) error { panic("boom") }); err == nil || !strings.Contains(err.Error(), "panic in transaction") {
+		t.Fatalf("expected panic error, got: %v", err)
 	}
 }

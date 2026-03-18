@@ -58,7 +58,7 @@ func setupServer(t *testing.T) (*http.Server, sqlmock.Sqlmock, string) {
 		},
 		REST:      config.ListenerConfig{Host: "127.0.0.1", Port: "0"},
 		LogTarget: config.LogConfig{Path: dir, FileName: "app.log"},
-		Service:   config.Service{Example: config.ServiceDetail{Host: "http://example"}},
+		Service:   config.Service{Example: config.ServiceDetail{Host: "https://example"}},
 	}
 
 	if err := utils.InitializeJWTService(true, true); err != nil {
@@ -75,7 +75,7 @@ func setupServer(t *testing.T) (*http.Server, sqlmock.Sqlmock, string) {
 
 	patchHTTP := monkey.PatchInstanceMethod(reflect.TypeOf(&transport.HTTPOutbound{}), "SendHTTPRequest", func(_ *transport.HTTPOutbound, _ logger.Logger) (response.HttpResponse, *codepkg.Code) {
 		gr := &response.GenericResponse[any]{}
-		gr.Body = models.Item{ID: 5, Name: "x"}
+		gr.Body = models.Item{ID: 5, Name: "sample"}
 		return response.HttpResponse{HTTPCode: http.StatusOK, RawResponsePayload: gr}, nil
 	})
 	t.Cleanup(patchHTTP.Unpatch)
@@ -89,7 +89,7 @@ func setupServer(t *testing.T) (*http.Server, sqlmock.Sqlmock, string) {
 func TestListItemsIntegration(t *testing.T) {
 	httpSrv, mock, tok := setupServer(t)
 
-	rows := sqlmock.NewRows([]string{"id", "name"}).AddRow(1, "foo")
+	rows := sqlmock.NewRows([]string{"id", "name"}).AddRow(1, "sample")
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
@@ -122,7 +122,7 @@ func TestCreateItemIntegration(t *testing.T) {
 	mock.ExpectExec("INSERT").WillReturnResult(sqlmock.NewResult(3, 1))
 	mock.ExpectCommit()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/items", bytes.NewBufferString(`{"id":0,"name":"foo"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/items", bytes.NewBufferString(`{"id":0,"name":"sample"}`))
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -138,7 +138,7 @@ func TestCreateItemIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	item := resp.Body
-	if item.ID != 3 || item.Name != "foo" {
+	if item.ID != 3 || item.Name != "sample" {
 		t.Fatalf("unexpected item %#v", item)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -149,7 +149,7 @@ func TestCreateItemIntegration(t *testing.T) {
 func TestGetItemIntegration(t *testing.T) {
 	httpSrv, mock, tok := setupServer(t)
 
-	rows := sqlmock.NewRows([]string{"id", "name"}).AddRow(2, "bar")
+	rows := sqlmock.NewRows([]string{"id", "name"}).AddRow(2, "example")
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/items/2", nil)
@@ -167,7 +167,7 @@ func TestGetItemIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	item := resp.Body
-	if item.ID != 2 || item.Name != "bar" {
+	if item.ID != 2 || item.Name != "example" {
 		t.Fatalf("unexpected item %#v", item)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -182,7 +182,7 @@ func TestUpdateItemIntegration(t *testing.T) {
 	mock.ExpectExec("UPDATE").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	req := httptest.NewRequest(http.MethodPut, "/api/items/4", bytes.NewBufferString(`{"id":4,"name":"baz"}`))
+	req := httptest.NewRequest(http.MethodPut, "/api/items/4", bytes.NewBufferString(`{"id":4,"name":"example"}`))
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -198,7 +198,7 @@ func TestUpdateItemIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	item := resp.Body
-	if item.ID != 4 || item.Name != "baz" {
+	if item.ID != 4 || item.Name != "example" {
 		t.Fatalf("unexpected item %#v", item)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

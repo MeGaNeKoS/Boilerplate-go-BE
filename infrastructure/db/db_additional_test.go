@@ -9,13 +9,14 @@ import (
 	"strings"
 	"testing"
 
+	"project-template/infrastructure/config"
+	"project-template/infrastructure/enums"
+
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/bouk/monkey"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database"
 	mysqlmigrate "github.com/golang-migrate/migrate/v4/database/mysql"
-	"project-template/infrastructure/config"
-	"project-template/infrastructure/enums"
 )
 
 type stubLogger struct {
@@ -23,12 +24,17 @@ type stubLogger struct {
 	infoMsgs  []string
 }
 
+func (s *stubLogger) Debug(string)                  {}
 func (s *stubLogger) DebugF(string, ...interface{}) {}
+func (s *stubLogger) Info(string)                    {}
 func (s *stubLogger) InfoF(format string, args ...interface{}) {
 	s.infoMsgs = append(s.infoMsgs, fmt.Sprintf(format, args...))
 }
+func (s *stubLogger) Warn(string)                    {}
 func (s *stubLogger) WarnF(string, ...interface{})  {}
+func (s *stubLogger) Error(string)                   {}
 func (s *stubLogger) ErrorF(string, ...interface{}) {}
+func (s *stubLogger) Fatal(string)                   {}
 func (s *stubLogger) FatalF(format string, args ...interface{}) {
 	s.fatalMsgs = append(s.fatalMsgs, fmt.Sprintf(format, args...))
 }

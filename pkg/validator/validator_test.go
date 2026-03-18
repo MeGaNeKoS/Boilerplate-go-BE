@@ -31,7 +31,8 @@ func TestValidateStructErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if _, ok := err.(ValidationErrors); !ok {
+	var validationErrors ValidationErrors
+	if !errors.As(err, &validationErrors) {
 		t.Fatalf("wrong error type: %T", err)
 	}
 }
@@ -56,16 +57,16 @@ func (s stubFieldErr) ActualTag() string {
 	}
 	return s.actual
 }
-func (s stubFieldErr) Namespace() string                 { return "" }
-func (s stubFieldErr) StructNamespace() string           { return "" }
-func (s stubFieldErr) Field() string                     { return s.field }
-func (s stubFieldErr) StructField() string               { return "" }
-func (s stubFieldErr) Value() interface{}                { return nil }
-func (s stubFieldErr) Param() string                     { return s.param }
-func (s stubFieldErr) Kind() reflect.Kind                { return reflect.String }
-func (s stubFieldErr) Type() reflect.Type                { return reflect.TypeOf("") }
-func (s stubFieldErr) Translate(ut ut.Translator) string { return "" }
-func (s stubFieldErr) Error() string                     { return "" }
+func (s stubFieldErr) Namespace() string                { return "" }
+func (s stubFieldErr) StructNamespace() string          { return "" }
+func (s stubFieldErr) Field() string                    { return s.field }
+func (s stubFieldErr) StructField() string              { return "" }
+func (s stubFieldErr) Value() interface{}               { return nil }
+func (s stubFieldErr) Param() string                    { return s.param }
+func (s stubFieldErr) Kind() reflect.Kind               { return reflect.String }
+func (s stubFieldErr) Type() reflect.Type               { return reflect.TypeOf("") }
+func (s stubFieldErr) Translate(_ ut.Translator) string { return "" }
+func (s stubFieldErr) Error() string                    { return "" }
 
 type stubFieldLevel struct{ val interface{} }
 
@@ -76,19 +77,19 @@ func (s stubFieldLevel) FieldName() string       { return "" }
 func (s stubFieldLevel) StructFieldName() string { return "" }
 func (s stubFieldLevel) Param() string           { return "" }
 func (s stubFieldLevel) GetTag() string          { return "" }
-func (s stubFieldLevel) ExtractType(field reflect.Value) (reflect.Value, reflect.Kind, bool) {
+func (s stubFieldLevel) ExtractType(_ reflect.Value) (reflect.Value, reflect.Kind, bool) {
 	return reflect.Value{}, 0, false
 }
 func (s stubFieldLevel) GetStructFieldOK() (reflect.Value, reflect.Kind, bool) {
 	return reflect.Value{}, 0, false
 }
-func (s stubFieldLevel) GetStructFieldOKAdvanced(val reflect.Value, namespace string) (reflect.Value, reflect.Kind, bool) {
+func (s stubFieldLevel) GetStructFieldOKAdvanced(_ reflect.Value, _ string) (reflect.Value, reflect.Kind, bool) {
 	return reflect.Value{}, 0, false
 }
 func (s stubFieldLevel) GetStructFieldOK2() (reflect.Value, reflect.Kind, bool, bool) {
 	return reflect.Value{}, 0, false, false
 }
-func (s stubFieldLevel) GetStructFieldOKAdvanced2(val reflect.Value, namespace string) (reflect.Value, reflect.Kind, bool, bool) {
+func (s stubFieldLevel) GetStructFieldOKAdvanced2(_ reflect.Value, _ string) (reflect.Value, reflect.Kind, bool, bool) {
 	return reflect.Value{}, 0, false, false
 }
 

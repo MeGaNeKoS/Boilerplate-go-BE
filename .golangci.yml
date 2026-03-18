@@ -1,0 +1,51 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    # Unhandled errors (same as GoLand's "Unhandled error" inspection)
+    - errcheck
+    # Deprecated APIs, simplifications, correctness (same as GoLand's deprecation warnings)
+    - staticcheck
+    # Suspicious constructs, including variable shadowing (same as GoLand's "Shadow declaration" inspection)
+    - govet
+    # Unnecessary type conversions (same as GoLand's "Redundant type conversion" inspection)
+    - unconvert
+    # Type assertions on errors should use errors.As (same as GoLand's "Type assertion on errors" inspection)
+    - errorlint
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      # Only exclude stdout/stderr writes where errors are truly unrecoverable.
+      exclude-functions:
+        - fmt.Print
+        - fmt.Println
+        - fmt.Printf
+    errorlint:
+      # Flag == and != comparisons on error types (should use errors.Is)
+      comparison: true
+      # Flag type assertions on error types (should use errors.As)
+      asserts: true
+      # Flag fmt.Errorf with %v instead of %w
+      errorf: true
+    govet:
+      enable:
+        # Enable the shadow analyzer to catch `:=` redeclarations that silently
+        # shadow outer variables (e.g. `err` in a nested scope).
+        - shadow
+
+  exclusions:
+    presets: []
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+      - path: _test\.go
+        text: "^QF"
+        linters:
+          - staticcheck
+      - path: _test\.go
+        text: "shadow"
+        linters:
+          - govet

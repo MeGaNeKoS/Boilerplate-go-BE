@@ -6,13 +6,15 @@ import (
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
-	humachi "github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 )
 
 func TestUseDefaultTag(t *testing.T) {
 	r := chi.NewRouter()
-	api := humachi.New(r, huma.DefaultConfig("x", "1"))
+	cfg := huma.DefaultConfig("x", "1")
+	cfg.CreateHooks = nil
+	api := humachi.New(r, cfg)
 	g := huma.NewGroup(api, "/items")
 	UseDefaultTag(g, "/items")
 	// operation without explicit tags
@@ -42,7 +44,9 @@ func TestUseDefaultTag(t *testing.T) {
 
 func TestUseDefaultTagEmptyPrefix(t *testing.T) {
 	r := chi.NewRouter()
-	api := humachi.New(r, huma.DefaultConfig("x", "1"))
+	cfg := huma.DefaultConfig("x", "1")
+	cfg.CreateHooks = nil
+	api := humachi.New(r, cfg)
 	g := huma.NewGroup(api, "/")
 	UseDefaultTag(g, "/")
 
@@ -66,9 +70,53 @@ func TestUseDefaultTagEmptyPrefix(t *testing.T) {
 	}
 }
 
+func TestNewGroupSetsDefaultTag(t *testing.T) {
+	r := chi.NewRouter()
+	cfg := huma.DefaultConfig("x", "1")
+	cfg.CreateHooks = nil
+	api := humachi.New(r, cfg)
+	parent := huma.NewGroup(api, "")
+	g := NewGroup(parent, "/items")
+
+	huma.Register(g, huma.Operation{
+		OperationID: "noTag",
+		Method:      http.MethodGet,
+		Path:        "/test",
+		Summary:     "no tag",
+	}, func(ctx context.Context, in *struct{}) (*struct{}, error) { return &struct{}{}, nil })
+
+	spec := api.OpenAPI()
+	if tags := spec.Paths["/items/test"].Get.Tags; len(tags) != 1 || tags[0] != "items" {
+		t.Fatalf("default tag not applied: %#v", tags)
+	}
+}
+
+func TestNewGroupEmptyPrefix(t *testing.T) {
+	r := chi.NewRouter()
+	cfg := huma.DefaultConfig("x", "1")
+	cfg.CreateHooks = nil
+	api := humachi.New(r, cfg)
+	parent := huma.NewGroup(api, "")
+	g := NewGroup(parent, "")
+
+	huma.Register(g, huma.Operation{
+		OperationID: "emptyPrefix",
+		Method:      http.MethodGet,
+		Path:        "/ep",
+		Summary:     "empty prefix",
+	}, func(ctx context.Context, in *struct{}) (*struct{}, error) { return &struct{}{}, nil })
+
+	spec := api.OpenAPI()
+	if tags := spec.Paths["/ep"].Get.Tags; len(tags) != 0 {
+		t.Fatalf("expected no tags for empty prefix, got %#v", tags)
+	}
+}
+
 func TestUseSecurity(t *testing.T) {
 	r := chi.NewRouter()
-	api := humachi.New(r, huma.DefaultConfig("x", "1"))
+	cfg := huma.DefaultConfig("x", "1")
+	cfg.CreateHooks = nil
+	api := humachi.New(r, cfg)
 	g := huma.NewGroup(api, "")
 	UseSecurity(g, "bearer")
 	// operation without security

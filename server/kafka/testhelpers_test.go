@@ -3,8 +3,9 @@ package kafka
 import (
 	"context"
 
-	"github.com/segmentio/kafka-go"
 	"project-template/pkg/logger"
+
+	"github.com/segmentio/kafka-go"
 )
 
 // HandleMessageTest exposes handleMessage for external tests.
@@ -20,11 +21,6 @@ func NewTestConsumer(log logger.Logger, r kafkaReader) *Consumer {
 // SetHandler allows tests to override the message handler.
 func SetHandler(c *Consumer, h func(context.Context, kafka.Message) error) {
 	c.handler = h
-}
-
-// SetReader allows tests to override the reader.
-func SetReader(c *Consumer, r kafkaReader) {
-	c.reader = r
 }
 
 // HasReader reports whether the consumer has a reader set.

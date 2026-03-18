@@ -21,13 +21,13 @@ type ServiceImpl interface {
 
 type Service struct {
 	ItemRepo repoitem.Repository
-	External example.ExampleOutbound
+	External example.Outbound
 	Log      logger.Logger
 }
 
 // NewService constructs a Service with the provided repository, external
 // service dependency and logger.
-func NewService(itemRepo repoitem.Repository, external example.ExampleOutbound, logger logger.Logger) ServiceImpl {
+func NewService(itemRepo repoitem.Repository, external example.Outbound, logger logger.Logger) ServiceImpl {
 	if itemRepo == nil || external == nil || logger == nil {
 		panic("missing dependencies")
 	}

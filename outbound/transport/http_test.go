@@ -20,10 +20,15 @@ import (
 
 type stubHTTPLogger struct{}
 
+func (stubHTTPLogger) Debug(string)                  {}
 func (stubHTTPLogger) DebugF(string, ...interface{}) {}
+func (stubHTTPLogger) Info(string)                    {}
 func (stubHTTPLogger) InfoF(string, ...interface{})  {}
+func (stubHTTPLogger) Warn(string)                    {}
 func (stubHTTPLogger) WarnF(string, ...interface{})  {}
+func (stubHTTPLogger) Error(string)                   {}
 func (stubHTTPLogger) ErrorF(string, ...interface{}) {}
+func (stubHTTPLogger) Fatal(string)                   {}
 func (stubHTTPLogger) FatalF(string, ...interface{}) {}
 func (stubHTTPLogger) ParentID() string              { return "p" }
 func (stubHTTPLogger) ChildID() string               { return "c" }
@@ -172,12 +177,12 @@ func TestBuildURL(t *testing.T) {
 	type q struct {
 		Q string `url:"q"`
 	}
-	u, err := buildURL(HTTPOutbound{Host: "http://x", Path: "/p", QueryParam: q{Q: "v"}})
-	if err != nil || u != "http://x/p?q=v" {
+	u, err := buildURL(HTTPOutbound{Host: "https://x", Path: "/p", QueryParam: q{Q: "v"}})
+	if err != nil || u != "https://x/p?q=v" {
 		t.Fatalf("bad url %s err %v", u, err)
 	}
-	u, err = buildURL(HTTPOutbound{Host: "http://x", Path: "/p"})
-	if err != nil || u != "http://x/p" {
+	u, err = buildURL(HTTPOutbound{Host: "https://x", Path: "/p"})
+	if err != nil || u != "https://x/p" {
 		t.Fatalf("bad url %s err %v", u, err)
 	}
 }
@@ -195,11 +200,11 @@ func TestMarshalRequestBody(t *testing.T) {
 }
 
 func TestBuildHTTPRequest(t *testing.T) {
-	req, err := buildHTTPRequest(HTTPOutbound{Method: http.MethodPost, Headers: map[string]string{"H": "V"}}, "http://x", []byte("b"))
+	req, err := buildHTTPRequest(HTTPOutbound{Method: http.MethodPost, Headers: map[string]string{"H": "V"}}, "https://x", []byte("b"))
 	if err != nil {
 		t.Fatalf("error %v", err)
 	}
-	if req.Method != http.MethodPost || req.URL.String() != "http://x" {
+	if req.Method != http.MethodPost || req.URL.String() != "https://x" {
 		t.Fatalf("unexpected request %v", req)
 	}
 	body, _ := io.ReadAll(req.Body)
@@ -252,42 +257,42 @@ func TestSendHTTPRequestErrors(t *testing.T) {
 	config.Cfg = &config.Config{Server: config.ServerConfig{Timeout: config.TimeoutConfig{Server: 1}, SkipTLSVerify: true}}
 
 	// buildURL error
-	o := &HTTPOutbound{Host: "http://x", Path: "/", Method: http.MethodGet, QueryParam: "bad", Response: &struct{}{}}
+	o := &HTTPOutbound{Host: "https://x", Path: "/", Method: http.MethodGet, QueryParam: "bad", Response: &struct{}{}}
 	_, code := o.SendHTTPRequest(stubHTTPLogger{})
 	if code == nil || code.InternalCode != codepkg.ErrCreateRequestUrl.InternalCode {
 		t.Fatalf("expected url error")
 	}
-	if strings.Contains(code.Message, "http://") {
+	if strings.Contains(code.Message, "https://") {
 		t.Fatalf("error message leaked URL: %s", code.Message)
 	}
 
 	// marshal body error
-	o = &HTTPOutbound{Host: "http://x", Path: "/", Method: http.MethodGet, Body: make(chan int), Response: &struct{}{}}
+	o = &HTTPOutbound{Host: "https://x", Path: "/", Method: http.MethodGet, Body: make(chan int), Response: &struct{}{}}
 	_, code = o.SendHTTPRequest(stubHTTPLogger{})
 	if code == nil || code.InternalCode != codepkg.ErrCreateRequestPayload.InternalCode {
 		t.Fatalf("expected payload error")
 	}
-	if strings.Contains(code.Message, "http://") {
+	if strings.Contains(code.Message, "https://") {
 		t.Fatalf("error message leaked URL: %s", code.Message)
 	}
 
 	// build request error
-	o = &HTTPOutbound{Host: "http://x", Path: "/", Method: "bad\n", Response: &struct{}{}}
+	o = &HTTPOutbound{Host: "https://x", Path: "/", Method: "bad\n", Response: &struct{}{}}
 	_, code = o.SendHTTPRequest(stubHTTPLogger{})
 	if code == nil || code.InternalCode != codepkg.ErrCreateRequestHeaders.InternalCode {
 		t.Fatalf("expected request error")
 	}
-	if strings.Contains(code.Message, "http://") {
+	if strings.Contains(code.Message, "https://") {
 		t.Fatalf("error message leaked URL: %s", code.Message)
 	}
 
 	// send error
-	o = &HTTPOutbound{Host: "http://127.0.0.1:1", Path: "/", Method: http.MethodGet, Response: &struct{}{}}
+	o = &HTTPOutbound{Host: "https://127.0.0.1:1", Path: "/", Method: http.MethodGet, Response: &struct{}{}}
 	_, code = o.SendHTTPRequest(stubHTTPLogger{})
 	if code == nil || code.InternalCode != codepkg.ErrFireExternalRequestFailed.InternalCode {
 		t.Fatalf("expected send error")
 	}
-	if strings.Contains(code.Message, "http://") {
+	if strings.Contains(code.Message, "https://") {
 		t.Fatalf("error message leaked URL: %s", code.Message)
 	}
 }
@@ -317,7 +322,13 @@ func TestGRPCOutboundInvoke(t *testing.T) {
 	srv := grpc.NewServer()
 	svc := &grpcSvc{}
 	pb.RegisterItemServiceServer(srv, svc)
-	go srv.Serve(lis)
+	go func() {
+		err := srv.Serve(lis)
+		if err != nil {
+			t.Errorf("failed to serve: %v", err)
+			return
+		}
+	}()
 	defer srv.Stop()
 
 	ob := GRPCOutbound{
@@ -358,7 +369,7 @@ func TestHandleResponseErrors(t *testing.T) {
 
 type badReader struct{}
 
-func (badReader) Read(p []byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+func (badReader) Read(_ []byte) (int, error) { return 0, io.ErrUnexpectedEOF }
 func (badReader) Close() error               { return nil }
 func TestEmptyResponse(t *testing.T) {
 	r := emptyResponse()

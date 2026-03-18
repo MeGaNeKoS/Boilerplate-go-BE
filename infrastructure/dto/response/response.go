@@ -3,6 +3,7 @@ package response
 type HttpResponse struct {
 	HTTPCode           int
 	ContentType        string
+	Headers            map[string]string
 	RawResponsePayload interface{}
 }
 
@@ -11,7 +12,26 @@ type BaseResponse struct {
 	ReturnMessage string `json:"returnMessage"`
 }
 
-// ProblemDetail represents an error payload following RFC 7807.
+// WithHeader sets a response header.
+func (r *HttpResponse) WithHeader(key, value string) *HttpResponse {
+	if r.Headers == nil {
+		r.Headers = map[string]string{}
+	}
+	r.Headers[key] = value
+	return r
+}
+
+// WithInstance sets the ProblemDetail instance field when the payload is a
+// ProblemDetail. It is a no-op for other payload types.
+func (r *HttpResponse) WithInstance(instance string) *HttpResponse {
+	if pd, ok := r.RawResponsePayload.(ProblemDetail); ok {
+		pd.Instance = instance
+		r.RawResponsePayload = pd
+	}
+	return r
+}
+
+// ProblemDetail represents an error payload following RFC 9457.
 type ProblemDetail struct {
 	Type     string `json:"type,omitempty"`
 	Title    string `json:"title"`

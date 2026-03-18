@@ -1,4 +1,4 @@
-package helpers
+package utils
 
 // hideFromPublicTag is applied to operations that should be omitted from the
 // public OpenAPI specification. The actual value is unlikely to collide with

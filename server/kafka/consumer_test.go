@@ -24,10 +24,15 @@ import (
 
 type stubLogger struct{}
 
+func (stubLogger) Debug(string)                  {}
 func (stubLogger) DebugF(string, ...interface{}) {}
+func (stubLogger) Info(string)                    {}
 func (stubLogger) InfoF(string, ...interface{})  {}
+func (stubLogger) Warn(string)                    {}
 func (stubLogger) WarnF(string, ...interface{})  {}
+func (stubLogger) Error(string)                   {}
 func (stubLogger) ErrorF(string, ...interface{}) {}
+func (stubLogger) Fatal(string)                   {}
 func (stubLogger) FatalF(string, ...interface{}) {}
 func (stubLogger) ParentID() string              { return "p" }
 func (stubLogger) ChildID() string               { return "c" }
@@ -46,8 +51,8 @@ func (s *stubItemRepo) List(_ context.Context) ([]models.Item, error) { return n
 func (s *stubItemRepo) Get(_ context.Context, id int) (*models.Item, error) {
 	return &models.Item{ID: id, Name: "n"}, nil
 }
-func (s *stubItemRepo) Update(_ context.Context, item *models.Item) error { return nil }
-func (s *stubItemRepo) Delete(_ context.Context, id int) error            { return nil }
+func (s *stubItemRepo) Update(_ context.Context, _ *models.Item) error { return nil }
+func (s *stubItemRepo) Delete(_ context.Context, _ int) error          { return nil }
 
 // outbound stubs
 
@@ -56,15 +61,15 @@ type stubExampleOutbound struct{}
 func (stubExampleOutbound) FetchItemByID(_ context.Context, id int) (models.Item, error) {
 	return models.Item{ID: id, Name: "ext"}, nil
 }
-func (stubExampleOutbound) FetchItemByFilter(_ context.Context, filter string) ([]models.Item, error) {
+func (stubExampleOutbound) FetchItemByFilter(_ context.Context, _ string) ([]models.Item, error) {
 	return nil, nil
 }
 
 type stubExampleAgg struct{}
 
-func (stubExampleAgg) HTTP() example.ExampleOutbound       { return stubExampleOutbound{} }
-func (stubExampleAgg) GRPC() example.ExampleGRPCOutbound   { return nil }
-func (stubExampleAgg) Kafka() example.ExampleKafkaOutbound { return nil }
+func (stubExampleAgg) HTTP() example.Outbound       { return stubExampleOutbound{} }
+func (stubExampleAgg) GRPC() example.GrpcOutbound   { return nil }
+func (stubExampleAgg) Kafka() example.KafkaOutbound { return nil }
 
 type stubOutbound struct{}
 

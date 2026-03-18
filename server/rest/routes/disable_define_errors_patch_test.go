@@ -5,13 +5,20 @@ import (
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
-	humachi "github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 )
 
+func TestNoopDefineErrors(t *testing.T) {
+	// Call noopDefineErrors with nil arguments to verify it is a no-op.
+	noopDefineErrors(nil, nil)
+}
+
 func TestDefineErrorsPatched(t *testing.T) {
 	r := chi.NewRouter()
-	api := humachi.New(r, huma.DefaultConfig("x", "1"))
+	cfg := huma.DefaultConfig("x", "1")
+	cfg.CreateHooks = nil
+	api := humachi.New(r, cfg)
 	huma.Get(api, "/test", func(ctx context.Context, in *struct{}) (*struct{ Message string }, error) {
 		return &struct{ Message string }{Message: "ok"}, nil
 	})

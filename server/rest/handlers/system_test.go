@@ -15,7 +15,7 @@ import (
 	"project-template/infrastructure/dto/response"
 	systemdto "project-template/infrastructure/dto/system"
 	"project-template/pkg/code"
-	"project-template/server/rest/handlers/resthuma"
+	restutils "project-template/server/rest/utils"
 )
 
 type mockSystemService struct {
@@ -44,7 +44,7 @@ func (m mockSystemService) Long(ctx context.Context, s int) (any, *code.Code) {
 	return nil, nil
 }
 
-func decodeSys[T any](t *testing.T, resp *resthuma.Response[*response.GenericResponse[T]]) response.GenericResponse[T] {
+func decodeSys[T any](t *testing.T, resp *restutils.Response[*response.GenericResponse[T]]) response.GenericResponse[T] {
 	rec := httptest.NewRecorder()
 	ctx := humatest.NewContext(nil, httptest.NewRequest(http.MethodGet, "/", nil), rec)
 	resp.Body(ctx)
@@ -60,7 +60,7 @@ func TestEcho(t *testing.T) {
 	orig := systemService
 	systemService = mockSystemService{echo: func(context.Context) (any, *code.Code) { return "ok", nil }}
 	defer func() { systemService = orig }()
-	resp, err := Echo(context.Background(), &resthuma.Empty{})
+	resp, err := Echo(context.Background(), &restutils.Empty{})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestEchoError(t *testing.T) {
 	orig := systemService
 	systemService = mockSystemService{echo: func(context.Context) (any, *code.Code) { return nil, code.ErrInternalServerError }}
 	defer func() { systemService = orig }()
-	if _, err := Echo(context.Background(), &resthuma.Empty{}); err == nil {
+	if _, err := Echo(context.Background(), &restutils.Empty{}); err == nil {
 		t.Fatalf("expected error")
 	}
 }
@@ -88,7 +88,7 @@ func TestCrash(t *testing.T) {
 			t.Fatalf("expected panic")
 		}
 	}()
-	_, _ = Crash(context.Background(), &resthuma.Empty{})
+	_, _ = Crash(context.Background(), &restutils.Empty{})
 }
 
 func TestLong(t *testing.T) {
@@ -113,5 +113,25 @@ func TestLongError(t *testing.T) {
 	defer func() { systemService = orig }()
 	if _, err := Long(context.Background(), &systemdto.LongInput{Sleep: 0}); err == nil {
 		t.Fatalf("expected error")
+	}
+}
+
+func TestEchoTypeAssertionFailure(t *testing.T) {
+	orig := systemService
+	systemService = mockSystemService{echo: func(context.Context) (any, *code.Code) { return 42, nil }}
+	defer func() { systemService = orig }()
+	_, err := Echo(context.Background(), &restutils.Empty{})
+	if err == nil {
+		t.Fatalf("expected error for non-string return")
+	}
+}
+
+func TestLongTypeAssertionFailure(t *testing.T) {
+	orig := systemService
+	systemService = mockSystemService{long: func(context.Context, int) (any, *code.Code) { return 42, nil }}
+	defer func() { systemService = orig }()
+	_, err := Long(context.Background(), &systemdto.LongInput{Sleep: 0})
+	if err == nil {
+		t.Fatalf("expected error for non-string return")
 	}
 }

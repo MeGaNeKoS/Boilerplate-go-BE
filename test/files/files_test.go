@@ -46,7 +46,10 @@ func TestUploadFileIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = fw.Write([]byte("data"))
-	mw.Close()
+	err = mw.Close()
+	if err != nil {
+		return
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/files/upload", &b)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
@@ -61,7 +64,10 @@ func TestUploadFileIntegrationMissingFile(t *testing.T) {
 	srv := setupServer(t)
 	var b bytes.Buffer
 	mw := multipart.NewWriter(&b)
-	mw.Close()
+	err := mw.Close()
+	if err != nil {
+		return
+	}
 	req := httptest.NewRequest(http.MethodPost, "/api/files/upload", &b)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	rec := httptest.NewRecorder()
@@ -107,7 +113,10 @@ func TestFormWithFileIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = fw.Write([]byte("data"))
-	mw.Close()
+	err = mw.Close()
+	if err != nil {
+		return
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/files/form", &b)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
@@ -123,7 +132,10 @@ func TestFormWithFileIntegrationMissingFile(t *testing.T) {
 	var b bytes.Buffer
 	mw := multipart.NewWriter(&b)
 	_ = mw.WriteField("name", "a")
-	mw.Close()
+	err := mw.Close()
+	if err != nil {
+		return
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/files/form", &b)
 	req.Header.Set("Content-Type", mw.FormDataContentType())

@@ -39,7 +39,7 @@ func setupServer(t *testing.T) (pb.ItemServiceClient, sqlmock.Sqlmock, string) {
 		Server:    config.ServerConfig{JWT: config.JWTConfig{PrivateKey: priv, PublicKey: pub}},
 		GRPC:      config.ListenerConfig{Host: "127.0.0.1", Port: "0"},
 		LogTarget: config.LogConfig{Path: dir, FileName: "app.log"},
-		Service:   config.Service{Example: config.ServiceDetail{Host: "http://example"}},
+		Service:   config.Service{Example: config.ServiceDetail{Host: "https://example"}},
 	}
 	if err := utils.InitializeJWTService(true, true); err != nil {
 		t.Fatal(err)

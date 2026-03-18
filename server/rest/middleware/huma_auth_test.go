@@ -8,7 +8,7 @@ import (
 
 	"github.com/bouk/monkey"
 	"github.com/danielgtaylor/huma/v2"
-	humachi "github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 
 	"project-template/infrastructure/dto/response"
@@ -26,7 +26,9 @@ func TestHumaAuthMiddlewareRegistersScheme(t *testing.T) {
 	})
 
 	r := chi.NewRouter()
-	api := humachi.New(r, huma.DefaultConfig("x", "1"))
+	cfg := huma.DefaultConfig("x", "1")
+	cfg.CreateHooks = nil
+	api := humachi.New(r, cfg)
 	g := huma.NewGroup(api, "/")
 	mw := HumaAuthMiddleware(g)
 

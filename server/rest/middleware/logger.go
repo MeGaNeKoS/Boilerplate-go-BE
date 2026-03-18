@@ -12,11 +12,19 @@ func LoggerMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		parentId := r.Header.Get("Parent-Id")
 		if parentId == "" {
-			identifier, _ := utils.UniqueIdByTime(86400)
+			identifier, err := utils.UniqueIdByTime(86400)
+			if err != nil {
+				http.Error(w, "ID generation failed", http.StatusInternalServerError)
+				return
+			}
 			parentId = "-" + identifier
 		}
 
-		childId, _ := utils.UniqueIdByTime(86400)
+		childId, err := utils.UniqueIdByTime(86400)
+		if err != nil {
+			http.Error(w, "ID generation failed", http.StatusInternalServerError)
+			return
+		}
 
 		log, err := logger.NewLogger(config.Cfg.LogTarget, parentId, childId)
 		if err != nil {

@@ -13,10 +13,15 @@ import (
 
 type stubLogger struct{}
 
+func (stubLogger) Debug(string)                  {}
 func (stubLogger) DebugF(string, ...interface{}) {}
+func (stubLogger) Info(string)                    {}
 func (stubLogger) InfoF(string, ...interface{})  {}
+func (stubLogger) Warn(string)                    {}
 func (stubLogger) WarnF(string, ...interface{})  {}
+func (stubLogger) Error(string)                   {}
 func (stubLogger) ErrorF(string, ...interface{}) {}
+func (stubLogger) Fatal(string)                   {}
 func (stubLogger) FatalF(string, ...interface{}) {}
 func (stubLogger) ParentID() string              { return "" }
 func (stubLogger) ChildID() string               { return "" }
@@ -46,16 +51,16 @@ func (s *stubItemRepo) Create(_ context.Context, item *models.Item) error {
 func (s *stubItemRepo) List(_ context.Context) ([]models.Item, error) {
 	return s.listResult, s.listErr
 }
-func (s *stubItemRepo) Get(_ context.Context, id int) (*models.Item, error) {
+func (s *stubItemRepo) Get(_ context.Context, _ int) (*models.Item, error) {
 	if s.getErr != nil {
 		return nil, s.getErr
 	}
 	return s.getResult, nil
 }
-func (s *stubItemRepo) Update(_ context.Context, item *models.Item) error {
+func (s *stubItemRepo) Update(_ context.Context, _ *models.Item) error {
 	return s.updateErr
 }
-func (s *stubItemRepo) Delete(_ context.Context, id int) error {
+func (s *stubItemRepo) Delete(_ context.Context, _ int) error {
 	return s.deleteErr
 }
 
@@ -76,7 +81,7 @@ func (s *stubExternal) FetchItemByID(_ context.Context, id int) (models.Item, er
 	return models.Item{ID: id}, nil
 }
 
-func (s *stubExternal) FetchItemByFilter(_ context.Context, f string) ([]models.Item, error) {
+func (s *stubExternal) FetchItemByFilter(_ context.Context, _ string) ([]models.Item, error) {
 	s.called = true
 	if s.err != nil {
 		return nil, s.err
@@ -97,7 +102,7 @@ func TestCreateItemError(t *testing.T) {
 	repo := &stubItemRepo{createErr: errors.New("boom")}
 	svc := NewService(repo, &stubExternal{}, stubLogger{})
 	item, errCode := svc.CreateItem(context.Background(), models.Item{Name: "b"})
-	if errCode != code.ErrInternalServerError || item.ID != 0 {
+	if !errors.Is(errCode, code.ErrInternalServerError) || item.ID != 0 {
 		t.Fatalf("expected error, got item %#v code %#v", item, errCode)
 	}
 }
@@ -106,7 +111,7 @@ func TestListItemsError(t *testing.T) {
 	repo := &stubItemRepo{listErr: errors.New("oops")}
 	svc := NewService(repo, &stubExternal{}, stubLogger{})
 	_, errCode := svc.ListItems(context.Background())
-	if errCode != code.ErrInternalServerError {
+	if !errors.Is(errCode, code.ErrInternalServerError) {
 		t.Fatalf("expected internal error, got %#v", errCode)
 	}
 }
@@ -124,7 +129,7 @@ func TestGetItemNotFound(t *testing.T) {
 	repo := &stubItemRepo{getErr: code.ErrItemNotFound}
 	svc := NewService(repo, &stubExternal{}, stubLogger{})
 	_, errCode := svc.GetItem(context.Background(), 5)
-	if errCode != code.ErrItemNotFound {
+	if !errors.Is(errCode, code.ErrItemNotFound) {
 		t.Fatalf("expected not found, got %#v", errCode)
 	}
 }
@@ -142,7 +147,7 @@ func TestGetItemError(t *testing.T) {
 	repo := &stubItemRepo{getErr: errors.New("db down")}
 	svc := NewService(repo, &stubExternal{}, stubLogger{})
 	_, errCode := svc.GetItem(context.Background(), 3)
-	if errCode != code.ErrInternalServerError {
+	if !errors.Is(errCode, code.ErrInternalServerError) {
 		t.Fatalf("expected internal error, got %#v", errCode)
 	}
 }
@@ -162,7 +167,7 @@ func TestUpdateItemNotFound(t *testing.T) {
 	out := &stubExternal{}
 	svc := NewService(repo, out, stubLogger{})
 	_, errCode := svc.UpdateItem(context.Background(), models.Item{ID: 2})
-	if errCode != code.ErrItemNotFound {
+	if !errors.Is(errCode, code.ErrItemNotFound) {
 		t.Fatalf("expected not found, got %#v", errCode)
 	}
 }
@@ -172,7 +177,7 @@ func TestUpdateItemError(t *testing.T) {
 	out := &stubExternal{}
 	svc := NewService(repo, out, stubLogger{})
 	_, errCode := svc.UpdateItem(context.Background(), models.Item{ID: 2})
-	if errCode != code.ErrInternalServerError {
+	if !errors.Is(errCode, code.ErrInternalServerError) {
 		t.Fatalf("expected internal error, got %#v", errCode)
 	}
 }
@@ -200,7 +205,7 @@ func TestDeleteItemNotFound(t *testing.T) {
 	repo := &stubItemRepo{deleteErr: code.ErrItemNotFound}
 	svc := NewService(repo, &stubExternal{}, stubLogger{})
 	errCode := svc.DeleteItem(context.Background(), 1)
-	if errCode != code.ErrItemNotFound {
+	if !errors.Is(errCode, code.ErrItemNotFound) {
 		t.Fatalf("expected not found, got %#v", errCode)
 	}
 }
@@ -209,7 +214,7 @@ func TestDeleteItemError(t *testing.T) {
 	repo := &stubItemRepo{deleteErr: errors.New("fail")}
 	svc := NewService(repo, &stubExternal{}, stubLogger{})
 	errCode := svc.DeleteItem(context.Background(), 1)
-	if errCode != code.ErrInternalServerError {
+	if !errors.Is(errCode, code.ErrInternalServerError) {
 		t.Fatalf("expected internal error, got %#v", errCode)
 	}
 }
@@ -218,7 +223,7 @@ func TestNewServiceMissingDependencies(t *testing.T) {
 	cases := []struct {
 		name string
 		repo repoitem.Repository
-		ext  example.ExampleOutbound
+		ext  example.Outbound
 		log  logger.Logger
 	}{
 		{"nil repo", nil, &stubExternal{}, stubLogger{}},

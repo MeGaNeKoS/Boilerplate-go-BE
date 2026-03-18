@@ -1,6 +1,7 @@
 package code
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,7 +17,7 @@ func TestRegisterLookup(t *testing.T) {
 	if !ok {
 		t.Fatalf("Lookup failed")
 	}
-	if c != ErrDummy {
+	if !errors.Is(c, ErrDummy) {
 		t.Fatalf("Lookup returned wrong pointer: %p != %p", c, ErrDummy)
 	}
 	if c.HTTPCode != http.StatusTeapot || c.Message != "dummy" || c.InternalCode != 999 {
@@ -55,7 +56,7 @@ func TestVarName(t *testing.T) {
 
 func TestRegisterPointerPreserved(t *testing.T) {
 	c := &Code{Message: "x"}
-	if got := register(c); got != c {
+	if got := register(c); !errors.Is(got, c) {
 		t.Fatalf("register returned different pointer")
 	}
 }

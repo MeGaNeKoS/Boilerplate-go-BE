@@ -38,8 +38,9 @@ func (r *Repository) GetItemRepository() repoitem.Repository {
 	t := reflect.TypeOf((*repoitem.Repository)(nil)).Elem()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if repo, ok := r.cache[t]; ok {
-		return repo.(repoitem.Repository)
+	if cached, ok := r.cache[t]; ok {
+		repo, _ := cached.(repoitem.Repository)
+		return repo
 	}
 	newRepo := repoitem.NewItemRepository(r.log, r.db)
 	r.cache[t] = newRepo

@@ -4,12 +4,15 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,10 +22,9 @@ import (
 	"project-template/infrastructure/config"
 	"project-template/pkg/lifecycle"
 	"project-template/pkg/logger"
-	"project-template/server/rest/handlers/resthuma"
-	"project-template/server/rest/helpers"
 	"project-template/server/rest/middleware"
 	"project-template/server/rest/routes"
+	restutils "project-template/server/rest/utils"
 
 	"project-template/infrastructure/utils"
 
@@ -68,6 +70,8 @@ func Start(doneChan chan struct{}) {
 }
 
 var chiWalk = chi.Walk
+var osWriteFile = os.WriteFile
+var jsonMarshal = json.Marshal
 
 func logRoutes(r chi.Routes, log logger.Logger) error {
 	routeMap := map[string][]string{}
@@ -109,57 +113,81 @@ var (
 // GetRESTServer ensures a singleton REST server instance.
 func GetRESTServer(cfg *config.Config, log logger.Logger) *RestServer {
 	restCreateOnce.Do(func() {
+		if cfg != nil {
+			restutils.SetPrivateCIDRs(cfg.Server.InternalCIDRs)
+		} else {
+			restutils.SetPrivateCIDRs(nil)
+		}
 		router := chi.NewRouter()
 		router.Use(chimw.StripSlashes)
 
 		cfgInfo := huma.DefaultConfig("Project Template API", "0.1rc")
+		cfgInfo.CreateHooks = nil
+		cfgInfo.Transformers = append(cfgInfo.Transformers, restutils.SchemaLinkTransformer)
 		if cfg != nil && cfg.Version != "" {
-			cfgInfo.OpenAPI.Info.Version = cfg.Version
+			cfgInfo.Info.Version = cfg.Version
 		}
 		cfgInfo.OpenAPI.OpenAPI = "3.0.3"
 		if cfg != nil && cfg.OpenAPI.Version != "" {
 			cfgInfo.OpenAPI.OpenAPI = cfg.OpenAPI.Version
 		}
+		publicDocs := "/docs/public"
+		publicSchemaPart := "/schema/v1"
+		internalDocs := "/docs/internal"
+		internalSchemaPart := "/schema"
+		if cfg != nil {
+			if cfg.OpenAPI.Docs.Public.URL != "" {
+				publicDocs = cfg.OpenAPI.Docs.Public.URL
+			}
+			if cfg.OpenAPI.Docs.Public.Schema != "" {
+				publicSchemaPart = cfg.OpenAPI.Docs.Public.Schema
+			}
+			if cfg.OpenAPI.Docs.Internal.URL != "" {
+				internalDocs = cfg.OpenAPI.Docs.Internal.URL
+			}
+			if cfg.OpenAPI.Docs.Internal.Schema != "" {
+				internalSchemaPart = cfg.OpenAPI.Docs.Internal.Schema
+			}
+		}
+		publicSchemaPath := publicDocs + publicSchemaPart
+		internalSchemaPath := internalDocs + internalSchemaPart
+		cfgInfo.SchemasPath = internalSchemaPath
 		cfgInfo.OpenAPIPath = ""
 		cfgInfo.DocsPath = ""
 
+		base := strings.TrimSuffix(utils.NormalizeBasePath(cfg.Server.Endpoint.Based), "/")
+		listenAddr := fmt.Sprintf("//%s:%s%s", cfg.REST.Host, cfg.REST.Port, base)
+		publicServerURL := listenAddr
+		if cfg.OpenAPI.Servers.Public != "" {
+			publicServerURL = strings.TrimSuffix(cfg.OpenAPI.Servers.Public, "/") + base
+		}
+		internalServerURL := publicServerURL
+		if cfg.OpenAPI.Servers.Internal != "" {
+			internalServerURL = strings.TrimSuffix(cfg.OpenAPI.Servers.Internal, "/") + base
+		}
+		cfgInfo.Servers = []*huma.Server{{URL: publicServerURL}}
 		api := humachi.New(router, cfgInfo)
 
-		base := strings.TrimSuffix(utils.NormalizeBasePath(cfg.Server.Endpoint.Based), "/")
 		grp := huma.NewGroup(api, base)
 
-		items := huma.NewGroup(grp)
-		routes.UseDefaultTag(items, "/items")
+		items := routes.NewGroup(grp, "/items")
 		items.UseMiddleware(middleware.HumaAuthMiddleware(items))
 		routes.ItemsRouter(items)
 
-		sys := huma.NewGroup(grp, "/system")
-		routes.UseDefaultTag(sys, "/system")
+		sys := routes.NewGroup(grp, "/system")
 		routes.SystemRouter(sys)
 
-		files := huma.NewGroup(grp, "/files")
-		routes.UseDefaultTag(files, "/files")
+		files := routes.NewGroup(grp, "/files")
 		routes.FilesRouter(files)
 
-		resthuma.RegisterSchemas(api)
-		resthuma.RegisterExamples(api)
+		restutils.RegisterSchemas(api)
+		restutils.RegisterExamples(api)
 
 		title := "API Reference"
-		if cfgInfo.OpenAPI.Info != nil && cfgInfo.OpenAPI.Info.Title != "" {
-			title = cfgInfo.OpenAPI.Info.Title
+		if cfgInfo.Info != nil && cfgInfo.Info.Title != "" {
+			title = cfgInfo.Info.Title
 		}
-		publicSpec := filterInternal(api.OpenAPI())
-		internalSpec := stripInternalTag(api.OpenAPI())
-		publicDocs := "/docs/public"
-		internalDocs := "/docs/internal"
-		if cfg.OpenAPI.Docs.Public != "" {
-			publicDocs = cfg.OpenAPI.Docs.Public
-		}
-		if cfg.OpenAPI.Docs.Internal != "" {
-			internalDocs = cfg.OpenAPI.Docs.Internal
-		}
-		registerDocs(api, publicSpec, "/openapi-public", publicDocs, title)
-		registerDocs(api, internalSpec, "/openapi-internal", internalDocs, title)
+		setupDocsAndSchemas(api, router, cfg, base, publicServerURL, internalServerURL, publicDocs, publicSchemaPath, internalDocs, internalSchemaPath, title)
 
 		log.InfoF("Registered routes:")
 		if err := logRoutes(router, log); err != nil {
@@ -167,7 +195,7 @@ func GetRESTServer(cfg *config.Config, log logger.Logger) *RestServer {
 			return
 		}
 
-		handler := middleware.ServiceMiddleware(router)
+		handler := middleware.ServiceMiddleware(middleware.ErrorFormatMiddleware(router))
 		handler = middleware.LoggerMiddleware(handler)
 		handler = middleware.RecoverMiddleware(log)(handler)
 
@@ -263,12 +291,12 @@ func filterInternal(o *huma.OpenAPI) *huma.OpenAPI {
 				return nil
 			}
 			for _, t := range op.Tags {
-				if t == helpers.InternalTag() {
+				if t == restutils.InternalTag() {
 					return nil
 				}
 			}
 			opCopy := *op
-			if params := helpers.InternalParamsFor(op.OperationID); len(params) > 0 {
+			if params := restutils.InternalParamsFor(op.OperationID); len(params) > 0 {
 				keep := make([]*huma.Param, 0, len(op.Parameters))
 				for _, p := range op.Parameters {
 					drop := false
@@ -302,11 +330,37 @@ func filterInternal(o *huma.OpenAPI) *huma.OpenAPI {
 	if len(o.Tags) > 0 {
 		tags := make([]*huma.Tag, 0, len(o.Tags))
 		for _, t := range o.Tags {
-			if t.Name != helpers.InternalTag() {
+			if t.Name != restutils.InternalTag() {
 				tags = append(tags, t)
 			}
 		}
 		filtered.Tags = tags
+	}
+
+	if o.Components != nil && o.Components.Schemas != nil {
+		reg := huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer)
+		for name, s := range o.Components.Schemas.Map() {
+			reg.Map()[name] = s
+		}
+		filtered.Components = &huma.Components{Schemas: reg}
+		refs := map[string]struct{}{}
+		seen := map[*huma.Schema]bool{}
+		for _, item := range filtered.Paths {
+			collectOpRefs(item.Get, reg, refs, seen)
+			collectOpRefs(item.Put, reg, refs, seen)
+			collectOpRefs(item.Post, reg, refs, seen)
+			collectOpRefs(item.Delete, reg, refs, seen)
+			collectOpRefs(item.Options, reg, refs, seen)
+			collectOpRefs(item.Head, reg, refs, seen)
+			collectOpRefs(item.Patch, reg, refs, seen)
+			collectOpRefs(item.Trace, reg, refs, seen)
+		}
+		m := reg.Map()
+		for name := range m {
+			if _, ok := refs[name]; !ok {
+				delete(m, name)
+			}
+		}
 	}
 
 	return &filtered
@@ -324,7 +378,7 @@ func stripInternalTag(o *huma.OpenAPI) *huma.OpenAPI {
 			opCopy := *op
 			tags := make([]string, 0, len(op.Tags))
 			for _, t := range op.Tags {
-				if t != helpers.InternalTag() {
+				if t != restutils.InternalTag() {
 					tags = append(tags, t)
 				}
 			}
@@ -344,7 +398,7 @@ func stripInternalTag(o *huma.OpenAPI) *huma.OpenAPI {
 	if len(o.Tags) > 0 {
 		tags := make([]*huma.Tag, 0, len(o.Tags))
 		for _, t := range o.Tags {
-			if t.Name != helpers.InternalTag() {
+			if t.Name != restutils.InternalTag() {
 				tags = append(tags, t)
 			}
 		}
@@ -353,36 +407,376 @@ func stripInternalTag(o *huma.OpenAPI) *huma.OpenAPI {
 	return &stripped
 }
 
-func registerDocs(api huma.API, spec *huma.OpenAPI, openAPIPath, docsPath, title string) {
-	var specYAML []byte
+func collectOpRefs(op *huma.Operation, reg huma.Registry, refs map[string]struct{}, seen map[*huma.Schema]bool) {
+	if op == nil {
+		return
+	}
+	for _, p := range op.Parameters {
+		collectSchemaRefs(p.Schema, reg, refs, seen)
+	}
+	if op.RequestBody != nil {
+		for _, mt := range op.RequestBody.Content {
+			collectSchemaRefs(mt.Schema, reg, refs, seen)
+		}
+	}
+	for _, r := range op.Responses {
+		for _, mt := range r.Content {
+			collectSchemaRefs(mt.Schema, reg, refs, seen)
+		}
+		for _, h := range r.Headers {
+			collectSchemaRefs(h.Schema, reg, refs, seen)
+		}
+	}
+}
+
+func collectSchemaRefs(s *huma.Schema, reg huma.Registry, refs map[string]struct{}, seen map[*huma.Schema]bool) {
+	if s == nil {
+		return
+	}
+	if s.Ref != "" {
+		if strings.HasPrefix(s.Ref, "#/components/schemas/") {
+			name := strings.TrimPrefix(s.Ref, "#/components/schemas/")
+			if _, ok := refs[name]; !ok {
+				refs[name] = struct{}{}
+				collectSchemaRefs(reg.SchemaFromRef(s.Ref), reg, refs, seen)
+			}
+		}
+		return
+	}
+	if seen[s] {
+		return
+	}
+	seen[s] = true
+	for _, p := range s.Properties {
+		collectSchemaRefs(p, reg, refs, seen)
+	}
+	collectSchemaRefs(s.Items, reg, refs, seen)
+	for _, a := range s.AllOf {
+		collectSchemaRefs(a, reg, refs, seen)
+	}
+	for _, a := range s.OneOf {
+		collectSchemaRefs(a, reg, refs, seen)
+	}
+	for _, a := range s.AnyOf {
+		collectSchemaRefs(a, reg, refs, seen)
+	}
+	if ap, ok := s.AdditionalProperties.(*huma.Schema); ok {
+		collectSchemaRefs(ap, reg, refs, seen)
+	}
+}
+
+func stripBasePath(o *huma.OpenAPI, base string) {
+	base = strings.TrimSuffix(base, "/")
+	if base == "" {
+		return
+	}
+	newPaths := map[string]*huma.PathItem{}
+	for p, item := range o.Paths {
+		if strings.HasPrefix(p, base) {
+			np := strings.TrimPrefix(p, base)
+			if np == "" {
+				np = "/"
+			}
+			newPaths[np] = item
+		} else {
+			newPaths[p] = item
+		}
+	}
+	o.Paths = newPaths
+}
+
+func registerSchemaRoute(r chi.Router, routePath, fsPath, outputDir string) {
+	base := strings.TrimSuffix(routePath, "/")
+	fsBase := filepath.Join(outputDir, strings.TrimPrefix(strings.TrimSuffix(fsPath, "/"), "/"))
+	r.Get(base+"/{schema}", func(w http.ResponseWriter, req *http.Request) {
+		name := chi.URLParam(req, "schema")
+		if !strings.HasSuffix(name, ".json") {
+			name += ".json"
+		}
+		fp := filepath.Join(fsBase, name)
+		data, err := os.ReadFile(fp)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		sum := sha256.Sum256(data)
+		etag := fmt.Sprintf("\"%x\"", sum)
+		if match := req.Header.Get("If-None-Match"); match != "" && match == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("Content-Type", "application/schema+json")
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("ETag", etag)
+		_, _ = w.Write(data)
+	})
+}
+
+func setupDocsAndSchemas(api huma.API, router chi.Router, cfg *config.Config, base, publicServerURL, internalServerURL, publicDocs, publicSchemaPath, internalDocs, internalSchemaPath, title string) {
+	publicSpec := filterInternal(api.OpenAPI())
+	internalSpec := stripInternalTag(api.OpenAPI())
+	stripBasePath(publicSpec, base)
+	stripBasePath(internalSpec, base)
+	if len(publicSpec.Servers) > 0 {
+		publicSpec.Servers[0].URL = publicServerURL
+	}
+	if len(internalSpec.Servers) > 0 {
+		internalSpec.Servers[0].URL = internalServerURL
+	}
+	restutils.RewriteSchemaExamples(publicSpec, publicServerURL+publicSchemaPath)
+	restutils.RewriteSchemaExamples(internalSpec, internalServerURL+internalSchemaPath)
+	restutils.RewriteSchemaLinks(publicSpec, false)
+	restutils.RewriteSchemaLinks(internalSpec, true)
+	restutils.RewriteExampleNames(publicSpec)
+	restutils.RewriteExampleNames(internalSpec)
+	docsServerURL := strings.TrimSuffix(publicServerURL, base)
+	internalDocsServerURL := strings.TrimSuffix(internalServerURL, base)
+	outputDir := "."
+	if cfg != nil && cfg.OpenAPI.OutputDir != "" {
+		outputDir = cfg.OpenAPI.OutputDir
+	}
+	_ = ensureDocs(publicSpec, docsServerURL, publicDocs, publicSchemaPath, outputDir)
+	_ = ensureDocs(internalSpec, internalDocsServerURL, internalDocs, internalSchemaPath, outputDir)
+	renderer := "stoplight"
+	if cfg != nil && cfg.OpenAPI.Docs.Renderer != "" {
+		renderer = cfg.OpenAPI.Docs.Renderer
+	}
+	registerDocs(api, publicSpec, "/openapi-public", publicDocs, title, renderer)
+	registerDocs(api, internalSpec, "/openapi-internal", internalDocs, title, renderer)
+	registerSchemaRoute(router, publicSchemaPath, publicSchemaPath, outputDir)
+	registerSchemaRoute(router, internalSchemaPath, internalSchemaPath, outputDir)
+}
+
+func ensureDocs(spec *huma.OpenAPI, serverURL, docsPath, schemaPath, outputDir string) error {
+	docDir := filepath.Join(outputDir, strings.TrimPrefix(docsPath, "/"))
+	schemaDir := filepath.Join(outputDir, strings.TrimPrefix(schemaPath, "/"))
+	if spec.Components != nil && spec.Components.Schemas != nil {
+		for _, s := range spec.Components.Schemas.Map() {
+			stripAllOfAdditionalProperties(s)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(docDir, "openapi.json")); os.IsNotExist(err) {
+		if err = os.MkdirAll(docDir, 0o755); err != nil {
+			return err
+		}
+		b, err := jsonMarshal(spec)
+		if err != nil {
+			return err
+		}
+		if err = osWriteFile(filepath.Join(docDir, "openapi.json"), b, 0o644); err != nil {
+			return err
+		}
+	}
+	// Generate schema files if the directory is missing or contains no
+	// non-hidden entries (e.g. only a .gitkeep file).
+	entries, err := os.ReadDir(schemaDir)
+	count := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		count++
+	}
+	if os.IsNotExist(err) || count == 0 {
+		if err = os.MkdirAll(schemaDir, 0o755); err != nil {
+			return err
+		}
+		reg := spec.Components.Schemas
+		for name, s := range reg.Map() {
+			flat := flattenSchema(reg, s, map[*huma.Schema]bool{})
+			stripAllOfAdditionalProperties(flat)
+			data, err := json.Marshal(flat)
+			if err != nil {
+				return err
+			}
+			var m map[string]any
+			if err = json.Unmarshal(data, &m); err != nil {
+				return err
+			}
+			schemaURL := "https://spec.openapis.org/oas/3.0/schema/2021-09-28#/$defs/Schema"
+			if strings.HasPrefix(spec.OpenAPI, "3.1") {
+				schemaURL = "https://spec.openapis.org/oas/3.1/schema/2022-02-27#/$defs/Schema"
+			}
+			m["$schema"] = schemaURL
+			m["$id"] = fmt.Sprintf("%s%s/%s.json", serverURL, schemaPath, name)
+			out, err := json.MarshalIndent(m, "", "  ")
+			if err != nil {
+				return err
+			}
+			if err = osWriteFile(filepath.Join(schemaDir, name+".json"), out, 0o644); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func flattenSchema(reg huma.Registry, s *huma.Schema, seen map[*huma.Schema]bool) *huma.Schema {
+	if s == nil {
+		return nil
+	}
+	if s.Ref != "" {
+		return flattenSchema(reg, reg.SchemaFromRef(s.Ref), seen)
+	}
+	if seen[s] {
+		return &huma.Schema{}
+	}
+	seen[s] = true
+
+	out := *s
+	out.Ref = ""
+	if len(s.Properties) > 0 {
+		out.Properties = make(map[string]*huma.Schema, len(s.Properties))
+		for k, v := range s.Properties {
+			out.Properties[k] = flattenSchema(reg, v, seen)
+		}
+	}
+	if s.Items != nil {
+		out.Items = flattenSchema(reg, s.Items, seen)
+	}
+	switch ap := s.AdditionalProperties.(type) {
+	case *huma.Schema:
+		out.AdditionalProperties = flattenSchema(reg, ap, seen)
+	default:
+		out.AdditionalProperties = ap
+	}
+	if len(s.AllOf) > 0 {
+		out.AllOf = make([]*huma.Schema, len(s.AllOf))
+		for i, v := range s.AllOf {
+			out.AllOf[i] = flattenSchema(reg, v, seen)
+		}
+	}
+	if len(s.AnyOf) > 0 {
+		out.AnyOf = make([]*huma.Schema, len(s.AnyOf))
+		for i, v := range s.AnyOf {
+			out.AnyOf[i] = flattenSchema(reg, v, seen)
+		}
+	}
+	if len(s.OneOf) > 0 {
+		out.OneOf = make([]*huma.Schema, len(s.OneOf))
+		for i, v := range s.OneOf {
+			out.OneOf[i] = flattenSchema(reg, v, seen)
+		}
+	}
+	if s.Not != nil {
+		out.Not = flattenSchema(reg, s.Not, seen)
+	}
+	return &out
+}
+
+func stripAllOfAdditionalProperties(s *huma.Schema) {
+	if s == nil {
+		return
+	}
+
+	if ap, ok := s.AdditionalProperties.(*huma.Schema); ok {
+		stripAllOfAdditionalProperties(ap)
+	}
+	s.AdditionalProperties = nil
+
+	if s.Items != nil {
+		stripAllOfAdditionalProperties(s.Items)
+	}
+	for _, sub := range s.Properties {
+		stripAllOfAdditionalProperties(sub)
+	}
+	for _, sub := range s.AllOf {
+		stripAllOfAdditionalProperties(sub)
+	}
+	for _, sub := range s.AnyOf {
+		stripAllOfAdditionalProperties(sub)
+	}
+	for _, sub := range s.OneOf {
+		stripAllOfAdditionalProperties(sub)
+	}
+	if s.Not != nil {
+		stripAllOfAdditionalProperties(s.Not)
+	}
+}
+
+func registerDocs(api huma.API, spec *huma.OpenAPI, openAPIPath, docsPath, title, renderer string) {
+	var specYAML, specJSON []byte
 	api.Adapter().Handle(&huma.Operation{
 		Method: http.MethodGet,
 		Path:   openAPIPath + ".yaml",
 	}, func(ctx huma.Context) {
 		ctx.SetHeader("Content-Type", "application/vnd.oai.openapi+yaml")
 		if specYAML == nil {
-			specYAML, _ = spec.DowngradeYAML()
+			var err error
+			if strings.HasPrefix(spec.OpenAPI, "3.1") {
+				specYAML, err = spec.YAML()
+			} else {
+				specYAML, err = spec.DowngradeYAML()
+			}
+			if err != nil {
+				_, _ = ctx.BodyWriter().Write([]byte(err.Error()))
+				return
+			}
 		}
-		ctx.BodyWriter().Write(specYAML)
+		_, _ = ctx.BodyWriter().Write(specYAML)
 	})
+
+	api.Adapter().Handle(&huma.Operation{
+		Method: http.MethodGet,
+		Path:   docsPath + "/openapi.json",
+	}, func(ctx huma.Context) {
+		ctx.SetHeader("Content-Type", "application/json")
+		if specJSON == nil {
+			var err error
+			specJSON, err = json.Marshal(spec)
+			if err != nil {
+				_, _ = ctx.BodyWriter().Write([]byte(err.Error()))
+				return
+			}
+		}
+		_, _ = ctx.BodyWriter().Write(specJSON)
+	})
+
 	api.Adapter().Handle(&huma.Operation{
 		Method: http.MethodGet,
 		Path:   docsPath,
 	}, func(ctx huma.Context) {
 		ctx.SetHeader("Content-Type", "text/html")
-		ctx.BodyWriter().Write([]byte(`<!doctype html>
+
+		page := `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="referrer" content="same-origin" />
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
     <title>` + title + `</title>
-    <link href="https://unpkg.com/@stoplight/elements@9.0.0/styles.min.css" rel="stylesheet" />
-    <script src="https://unpkg.com/@stoplight/elements@9.0.0/web-components.min.js" integrity="sha256-Tqvw1qE2abI+G6dPQBc5zbeHqfVwGoamETU3/TSpUw4=" crossorigin="anonymous"></script>
+`
+
+		switch strings.ToLower(renderer) {
+		case "swagger", "swaggerui", "swagger-ui":
+			page += `    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist/swagger-ui.css" />
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
+    <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-standalone-preset.js"></script>
+    <script>
+      window.onload = () => {
+        SwaggerUIBundle({
+          url: '` + openAPIPath + `.yaml',
+          dom_id: '#swagger-ui',
+          presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+          layout: 'BaseLayout'
+        });
+      };
+    </script>
+  </body>
+</html>`
+		default:
+			page += `    <link href="https://unpkg.com/@stoplight/elements/styles.min.css" rel="stylesheet" />
+    <script src="https://unpkg.com/@stoplight/elements/web-components.min.js" crossorigin="anonymous"></script>
   </head>
   <body style="height: 100vh;">
     <elements-api apiDescriptionUrl="` + openAPIPath + `.yaml" router="hash" layout="sidebar" tryItCredentialsPolicy="same-origin" />
   </body>
-</html>`))
+</html>`
+		}
+
+		_, _ = ctx.BodyWriter().Write([]byte(page))
 	})
 }

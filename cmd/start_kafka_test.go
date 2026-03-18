@@ -28,10 +28,15 @@ func patchServer(l logger.Logger, err error) func() {
 
 type kafkaStubLogger struct{}
 
+func (kafkaStubLogger) Debug(string)                  {}
 func (kafkaStubLogger) DebugF(string, ...interface{}) {}
+func (kafkaStubLogger) Info(string)                    {}
 func (kafkaStubLogger) InfoF(string, ...interface{})  {}
+func (kafkaStubLogger) Warn(string)                    {}
 func (kafkaStubLogger) WarnF(string, ...interface{})  {}
+func (kafkaStubLogger) Error(string)                   {}
 func (kafkaStubLogger) ErrorF(string, ...interface{}) {}
+func (kafkaStubLogger) Fatal(string)                   {}
 func (kafkaStubLogger) FatalF(string, ...interface{}) {}
 func (kafkaStubLogger) ParentID() string              { return "" }
 func (kafkaStubLogger) ChildID() string               { return "" }

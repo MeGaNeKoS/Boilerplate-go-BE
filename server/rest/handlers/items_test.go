@@ -15,12 +15,12 @@ import (
 	dtoitem "project-template/infrastructure/dto/item"
 	"project-template/infrastructure/dto/response"
 	"project-template/infrastructure/utils"
-	outbound "project-template/outbound"
-	example "project-template/outbound/service/example"
+	"project-template/outbound"
+	"project-template/outbound/service/example"
 	"project-template/pkg/code"
 	"project-template/pkg/logger"
 	repoitem "project-template/repositories/item"
-	"project-template/server/rest/handlers/resthuma"
+	restutils "project-template/server/rest/utils"
 )
 
 type mockItemRepo struct {
@@ -68,10 +68,15 @@ func (m mockRepoAgg) GetItemRepository() repoitem.Repository { return m.repo }
 
 type noopLogger struct{}
 
+func (noopLogger) Debug(string)                  {}
 func (noopLogger) DebugF(string, ...interface{}) {}
+func (noopLogger) Info(string)                    {}
 func (noopLogger) InfoF(string, ...interface{})  {}
+func (noopLogger) Warn(string)                    {}
 func (noopLogger) WarnF(string, ...interface{})  {}
+func (noopLogger) Error(string)                   {}
 func (noopLogger) ErrorF(string, ...interface{}) {}
+func (noopLogger) Fatal(string)                   {}
 func (noopLogger) FatalF(string, ...interface{}) {}
 func (noopLogger) ParentID() string              { return "" }
 func (noopLogger) ChildID() string               { return "" }
@@ -82,19 +87,19 @@ type mockExampleOutbound struct {
 	fetchByIDCalled bool
 }
 
-func (m *mockExampleOutbound) FetchItemByID(ctx context.Context, id int) (dtoitem.Item, error) {
+func (m *mockExampleOutbound) FetchItemByID(_ context.Context, _ int) (dtoitem.Item, error) {
 	m.fetchByIDCalled = true
 	return dtoitem.Item{}, nil
 }
-func (m *mockExampleOutbound) FetchItemByFilter(ctx context.Context, filter string) ([]dtoitem.Item, error) {
+func (m *mockExampleOutbound) FetchItemByFilter(_ context.Context, _ string) ([]dtoitem.Item, error) {
 	return nil, nil
 }
 
-type mockExampleService struct{ out example.ExampleOutbound }
+type mockExampleService struct{ out example.Outbound }
 
-func (m mockExampleService) HTTP() example.ExampleOutbound       { return m.out }
-func (m mockExampleService) GRPC() example.ExampleGRPCOutbound   { return nil }
-func (m mockExampleService) Kafka() example.ExampleKafkaOutbound { return nil }
+func (m mockExampleService) HTTP() example.Outbound       { return m.out }
+func (m mockExampleService) GRPC() example.GrpcOutbound   { return nil }
+func (m mockExampleService) Kafka() example.KafkaOutbound { return nil }
 
 type mockOutboundAgg struct{ svc example.Service }
 
@@ -102,7 +107,7 @@ func (m mockOutboundAgg) Example() example.Service { return m.svc }
 
 var _ outbound.Impl = (*mockOutboundAgg)(nil)
 
-func setupCtx(repo repoitem.Repository, exOutbound example.ExampleOutbound) context.Context {
+func setupCtx(repo repoitem.Repository, exOutbound example.Outbound) context.Context {
 	ctx := context.Background()
 	ctx = utils.SetRepoCtx(ctx, mockRepoAgg{repo})
 	ctx = utils.SetOutboundCtx(ctx, mockOutboundAgg{mockExampleService{exOutbound}})
@@ -110,7 +115,7 @@ func setupCtx(repo repoitem.Repository, exOutbound example.ExampleOutbound) cont
 	return ctx
 }
 
-func decodeBody[T any](t *testing.T, resp *resthuma.Response[*response.GenericResponse[T]]) response.GenericResponse[T] {
+func decodeBody[T any](t *testing.T, resp *restutils.Response[*response.GenericResponse[T]]) response.GenericResponse[T] {
 	rec := httptest.NewRecorder()
 	ctx := humatest.NewContext(nil, httptest.NewRequest(http.MethodGet, "/", nil), rec)
 	resp.Body(ctx)
@@ -126,7 +131,8 @@ func expectInternal(t *testing.T, err error) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	se, ok := err.(huma.StatusError)
+	var se huma.StatusError
+	ok := errors.As(err, &se)
 	if !ok || se.GetStatus() != http.StatusInternalServerError {
 		t.Fatalf("unexpected error %#v", err)
 	}
@@ -135,7 +141,7 @@ func expectInternal(t *testing.T, err error) {
 func TestListItems(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
 	repo := mockItemRepo{list: func(context.Context) ([]dtoitem.Item, error) {
-		return []dtoitem.Item{{ID: 1, Name: "a"}}, nil
+		return []dtoitem.Item{{ID: 1, Name: "sample"}}, nil
 	}}
 	ctx := setupCtx(repo, &mockExampleOutbound{})
 	resp, err := ListItems(ctx, &dtoitem.ListItemsInput{})
@@ -143,7 +149,7 @@ func TestListItems(t *testing.T) {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	out := decodeBody(t, resp)
-	if len(out.Body) != 1 || out.Body[0].Name != "a" {
+	if len(out.Body) != 1 || out.Body[0].Name != "sample" {
 		t.Fatalf("body %#v", out.Body)
 	}
 }
@@ -166,7 +172,7 @@ func TestCreateItem(t *testing.T) {
 		return nil
 	}}
 	ctx := setupCtx(repo, &mockExampleOutbound{})
-	in := &dtoitem.CreateItemInput{Body: dtoitem.Item{Name: "x"}}
+	in := &dtoitem.CreateItemInput{Body: dtoitem.Item{Name: "sample"}}
 	resp, err := CreateItem(ctx, in)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -184,7 +190,7 @@ func TestCreateItemError(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
 	repo := mockItemRepo{create: func(context.Context, *dtoitem.Item) error { return errors.New("boom") }}
 	ctx := setupCtx(repo, &mockExampleOutbound{})
-	if _, err := CreateItem(ctx, &dtoitem.CreateItemInput{Body: dtoitem.Item{Name: "x"}}); err == nil {
+	if _, err := CreateItem(ctx, &dtoitem.CreateItemInput{Body: dtoitem.Item{Name: "sample"}}); err == nil {
 		t.Fatalf("expected error")
 	}
 }
@@ -192,7 +198,7 @@ func TestCreateItemError(t *testing.T) {
 func TestGetItem(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
 	repo := mockItemRepo{get: func(ctx context.Context, id int) (*dtoitem.Item, error) {
-		return &dtoitem.Item{ID: id, Name: "y"}, nil
+		return &dtoitem.Item{ID: id, Name: "example"}, nil
 	}}
 	ctx := setupCtx(repo, &mockExampleOutbound{})
 	resp, err := GetItem(ctx, &dtoitem.IDPath{ID: 7})
@@ -200,7 +206,7 @@ func TestGetItem(t *testing.T) {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	out := decodeBody(t, resp)
-	if out.Body.ID != 7 || out.Body.Name != "y" {
+	if out.Body.ID != 7 || out.Body.Name != "example" {
 		t.Fatalf("body %#v", out.Body)
 	}
 }
@@ -216,19 +222,19 @@ func TestGetItemNotFound(t *testing.T) {
 
 func TestUpdateItem(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	outbound := &mockExampleOutbound{}
+	o := &mockExampleOutbound{}
 	repo := mockItemRepo{update: func(ctx context.Context, item *dtoitem.Item) error { return nil }}
-	ctx := setupCtx(repo, outbound)
-	in := &dtoitem.UpdateItemInput{ID: 3, Body: dtoitem.Item{Name: "z"}}
+	ctx := setupCtx(repo, o)
+	in := &dtoitem.UpdateItemInput{ID: 3, Body: dtoitem.Item{Name: "example"}}
 	resp, err := UpdateItem(ctx, in)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if !outbound.fetchByIDCalled {
+	if !o.fetchByIDCalled {
 		t.Fatalf("expected fetch call")
 	}
 	out := decodeBody(t, resp)
-	if out.Body.ID != 3 || out.Body.Name != "z" {
+	if out.Body.ID != 3 || out.Body.Name != "example" {
 		t.Fatalf("body %#v", out.Body)
 	}
 }
@@ -237,7 +243,7 @@ func TestUpdateItemError(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
 	repo := mockItemRepo{update: func(context.Context, *dtoitem.Item) error { return code.ErrItemNotFound }}
 	ctx := setupCtx(repo, &mockExampleOutbound{})
-	in := &dtoitem.UpdateItemInput{ID: 2, Body: dtoitem.Item{Name: "a"}}
+	in := &dtoitem.UpdateItemInput{ID: 2, Body: dtoitem.Item{Name: "sample"}}
 	if _, err := UpdateItem(ctx, in); err == nil {
 		t.Fatalf("expected error")
 	}

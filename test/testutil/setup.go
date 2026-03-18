@@ -24,14 +24,19 @@ import (
 // StubLogger implements logger.Logger with no-op methods.
 type StubLogger struct{}
 
-func (StubLogger) DebugF(string, ...interface{}) { return }
-func (StubLogger) InfoF(string, ...interface{})  { return }
-func (StubLogger) WarnF(string, ...interface{})  { return }
-func (StubLogger) ErrorF(string, ...interface{}) { return }
-func (StubLogger) FatalF(string, ...interface{}) { return }
-func (StubLogger) ParentID() string              { return "p" }
-func (StubLogger) ChildID() string               { return "c" }
-func (StubLogger) CloseLogFile()                 { return }
+func (StubLogger) Debug(_ string)                    {}
+func (StubLogger) DebugF(_ string, _ ...interface{}) {}
+func (StubLogger) Info(_ string)                     {}
+func (StubLogger) InfoF(_ string, _ ...interface{})  {}
+func (StubLogger) Warn(_ string)                     {}
+func (StubLogger) WarnF(_ string, _ ...interface{})  {}
+func (StubLogger) Error(_ string)                    {}
+func (StubLogger) ErrorF(_ string, _ ...interface{}) {}
+func (StubLogger) Fatal(_ string)                    {}
+func (StubLogger) FatalF(_ string, _ ...interface{}) {}
+func (StubLogger) ParentID() string                  { return "p" }
+func (StubLogger) ChildID() string                   { return "c" }
+func (StubLogger) CloseLogFile()                     {}
 
 // MockDB implements the db.DB interface for integration tests.
 type MockDB struct{ DB *sql.DB }
@@ -39,7 +44,7 @@ type MockDB struct{ DB *sql.DB }
 func (m MockDB) New() error { return nil }
 
 // SetLogger implements db.DB but performs no logging.
-func (MockDB) SetLogger(logger.Logger)               {}
+func (MockDB) SetLogger(_ logger.Logger)             {}
 func (m MockDB) GetDB() *sql.DB                      { return m.DB }
 func (m MockDB) GetGoquDialect() goqu.DialectWrapper { return goqu.Dialect("mysql") }
 func (m MockDB) ExecContext(ctx context.Context, q string, args ...interface{}) (sql.Result, error) {
@@ -65,8 +70,8 @@ func (m MockDB) Ping() error  { return nil }
 // NewDBMock creates a sql.DB and sqlmock instance for tests.
 func NewDBMock(t *testing.T) (*sql.DB, sqlmock.Sqlmock) {
 	t.Helper()
-	db, mock, _ := sqlmock.New()
-	return db, mock
+	dbMock, mock, _ := sqlmock.New()
+	return dbMock, mock
 }
 
 // PatchDB replaces db.GetDBInstance with a mock implementation.

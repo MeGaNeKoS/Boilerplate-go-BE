@@ -19,6 +19,8 @@ func NotifyReady() {
 		log.Println("startup:", err)
 	}
 	if os.Getenv("NOTIFY_SOCKET") != "" {
-		_, _ = daemon.SdNotify(false, daemon.SdNotifyReady)
+		if _, err := daemon.SdNotify(false, daemon.SdNotifyReady); err != nil {
+			log.Printf("systemd notify failed: %v", err)
+		}
 	}
 }

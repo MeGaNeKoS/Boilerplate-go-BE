@@ -19,7 +19,10 @@ func TestPrintVersion(t *testing.T) {
 	old := os.Stdout
 	os.Stdout = w
 	printVersion()
-	w.Close()
+	err := w.Close()
+	if err != nil {
+		return
+	}
 	os.Stdout = old
 	data, _ := io.ReadAll(r)
 	out := string(data)
@@ -80,7 +83,10 @@ func TestPrintVersionDefaults(t *testing.T) {
 	old := os.Stdout
 	os.Stdout = w
 	printVersion()
-	w.Close()
+	err := w.Close()
+	if err != nil {
+		return
+	}
 	os.Stdout = old
 	data, _ := io.ReadAll(r)
 	out := string(data)

@@ -21,10 +21,15 @@ const (
 )
 
 type Logger interface {
+	Debug(msg string)
 	DebugF(format string, args ...interface{})
+	Info(msg string)
 	InfoF(format string, args ...interface{})
+	Warn(msg string)
 	WarnF(format string, args ...interface{})
+	Error(msg string)
 	ErrorF(format string, args ...interface{})
+	Fatal(msg string)
 	FatalF(format string, args ...interface{})
 	ParentID() string
 	ChildID() string
@@ -55,5 +60,4 @@ type loggerImpl struct {
 	core     *loggerCore
 	parentID string
 	childID  string
-	depth    int
 }
