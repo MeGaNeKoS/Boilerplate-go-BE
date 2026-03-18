@@ -493,19 +493,16 @@ func TestGetRESTServerVersionOverride(t *testing.T) {
 		REST:      config.ListenerConfig{Host: "127.0.0.1", Port: "0"},
 		Server:    config.ServerConfig{Timeout: config.TimeoutConfig{Read: 1, Write: 1, Idle: 1}, Endpoint: config.EndpointConfig{Based: "/api"}},
 		LogTarget: config.LogConfig{Path: t.TempDir(), FileName: "app.log"},
-		OpenAPI:   config.OpenAPIConfig{Version: "3.1.0"},
+		OpenAPI:   config.OpenAPIConfig{Version: "3.1.0", OutputDir: t.TempDir()},
 	}
 	prev := config.Cfg
 	config.Cfg = cfg
-	wd, _ := os.Getwd()
-	tmp := t.TempDir()
-	_ = os.Chdir(tmp)
-	defer func() { _ = os.Chdir(wd); config.Cfg = prev }()
+	defer func() { config.Cfg = prev }()
 	srv := GetRESTServer(cfg, stubLog{})
 	if srv == nil {
 		t.Fatalf("nil server")
 	}
-	body, err := os.ReadFile("docs/public/openapi.json")
+	body, err := os.ReadFile(filepath.Join(cfg.OpenAPI.OutputDir, "docs/public/openapi.json"))
 	if err != nil {
 		t.Fatalf("read spec: %v", err)
 	}

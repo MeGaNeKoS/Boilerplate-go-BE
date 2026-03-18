@@ -531,7 +531,7 @@ func setupDocsAndSchemas(api huma.API, router chi.Router, cfg *config.Config, ba
 	restutils.RewriteExampleNames(internalSpec)
 	docsServerURL := strings.TrimSuffix(publicServerURL, base)
 	internalDocsServerURL := strings.TrimSuffix(internalServerURL, base)
-	outputDir := "."
+	outputDir := os.TempDir()
 	if cfg != nil && cfg.OpenAPI.OutputDir != "" {
 		outputDir = cfg.OpenAPI.OutputDir
 	}

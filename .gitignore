@@ -1,9 +1,5 @@
-docs/openapi.json
-docs/openapi.yaml
-docs/public/openapi.json
-docs/public/schema/*.json
-docs/public/schema/v1/*.json
-docs/internal/openapi.json
-docs/internal/schema/*.json
-
+# Generated error code mapping
 server/rest/handlers/resthuma/errorcodes_gen.go
+
+# Coverage profiles
+*.out
