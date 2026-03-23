@@ -1,62 +1,68 @@
 # REST Server (`server/rest`)
 
-This folder contains the HTTP transport built with `chi`. Routes are grouped in the
-`routes` package, handlers under `handlers` act as the controllers, and
-`middleware` sets up logging, authentication and context values for each request.
-The `routes.NewGroup` helper wraps `huma.NewGroup` to automatically tag each
-group with its prefix, keeping route registration concise.
+This folder contains the HTTP transport built with Chi router and neoma framework.
 
-The generated OpenAPI documentation is served under `/docs/public` for the
-public API and `/docs/internal` for the full internal set. Individual component
-schemas are available at `/docs/public/schema/v1/{name}.json` for the public API and
-`/docs/internal/schema/{name}.json` for the internal version. Each JSON response
-includes a `Link` header pointing to the schema describing its body, allowing
-clients to download the schema for validation. The docs base paths, HTML
-renderer (Stoplight Elements or Swagger UI) and OpenAPI version are
-configurable via the `OpenAPI` section in `config.yaml`. The `Servers` subsection
-sets the public and internal base URLs used in generated links so `$id` fields
-and `describedby` headers are absolute. Schema download routes live under the
-docs paths by default and typically do not need separate configuration.
-Request struct fields may be tagged with `internal:"true"` alongside their
-`query`, `header`, `path`, etc. tags to hide those parameters from the public
-spec while keeping them in the internal docs. For example:
+## Structure
+
+- `envelope.go` — ErrorHandler, SuccessEnvelope, ErrorEnvelope (response formatting)
+- `dto/` — REST-specific input/output types (file uploads, system DTOs)
+- `handlers/` — Handler functions (controllers)
+- `middleware/` — Logging, authentication, error formatting, recovery
+- `routes/` — Route registration per resource
+
+## Route Groups
+
+Routes are grouped using neoma's `middleware.Group`:
 
 ```go
-type listItemsInput struct {
-    Q       string `query:"q"`
-    Debug   string `query:"debug" internal:"true"`
-    Token   string `header:"X-Debug" internal:"true"`
+items := grp.Group("/items")
+items.UseDefaultTag("items")           // auto-tag in OpenAPI
+items.WithSecurity("bearerAuth", ...)  // register scheme + apply + add middleware
+```
+
+## Input/Output Structs
+
+neoma uses struct tags to wire HTTP requests and responses:
+
+```go
+// Input: how to read the request
+type UpdateInput struct {
+    ID   int  `path:"id"`                           // URL path parameter
+    Body struct {
+        Name string `json:"name" required:"true"`   // JSON body field
+    }
+}
+
+// Output: how to write the response
+type ItemOutput struct {
+    Status   int    `yaml:"-"`           // HTTP status code
+    Location string `header:"Location"`  // response header
+    Body     *Item                       // JSON response body
 }
 ```
 
-Only `q` will appear in `/docs/public`; the `debug` query parameter and
-`X-Debug` header remain in `/docs/internal`.
-Entire handlers can be hidden by adding `utils.InternalTag()` to their route
-definition's tag list. This helper expands to the `_hide_from_public_api` tag.
-Endpoints carrying it are excluded from `/docs/public` but remain visible at
-`/docs/internal`.
-Route definitions are stored separately in `routes/*_def.go` so examples and
-descriptions only need to be maintained in one place. Keeping them out of the
-handler files avoids the limitations of annotation-based docs, letting us
-include structured examples without duplicating code.
+Validation tags (`minimum`, `maximum`, `minLength`, `enum`, etc.) are enforced
+at runtime and documented in the generated OpenAPI spec.
 
-Request structs may also include validation tags such as `minimum`,
-`maximum` or `enum` to enforce constraints and document them in the
-OpenAPI schema. For example:
+## Internal Parameters
+
+Request struct fields tagged with `internal:"true"` are hidden from the public
+OpenAPI spec but visible in the internal spec:
 
 ```go
 type ListItemsInput struct {
-    Limit int `query:"limit" minimum:"1" maximum:"100"`
-}
-
-type Item struct {
-    Name string `json:"name" enum:"sample,example"`
+    Limit int    `query:"limit"`
+    Debug string `query:"debug" internal:"true"`
 }
 ```
 
-The server validates incoming requests against these rules before invoking
-the handler and the generated documentation reflects the same limits.
+## Hidden Operations
 
-A small monkey patch disables Huma's default error response generation so only
-our custom errors appear in the OpenAPI docs. See `routes/disable_define_errors_patch.go`
-for details and how to disable it with the `disable_huma_patch` build tag.
+Operations with `op.Hidden = true` are excluded from the public spec but still
+routed normally. They appear in `/internal/openapi.json` if configured.
+
+## OpenAPI Docs
+
+- Public docs: configurable via `config.yaml` (default `/public/docs`)
+- Internal docs: configurable via `config.yaml` (includes hidden operations)
+- Schema endpoint: `/schemas/{name}.json`

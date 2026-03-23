@@ -74,7 +74,7 @@ func TestSendHTTPRequestHandleResponseErrorAndCloseWarn(t *testing.T) {
 	defer monkey.Unpatch(handleResponse)
 
 	_, code := o.SendHTTPRequest(stubLogger{})
-	if code == nil || code.InternalCode != codepkg.ErrReadExternalRequestFailed.InternalCode {
+	if code == nil || code.Message != codepkg.ErrReadExternalRequestFailed.Message {
 		t.Fatalf("expected read external error, got %#v", code)
 	}
 }

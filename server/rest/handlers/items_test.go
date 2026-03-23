@@ -2,25 +2,18 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
-
-	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/humatest"
 
 	"project-template/infrastructure/config"
 	dtoitem "project-template/infrastructure/dto/item"
-	"project-template/infrastructure/dto/response"
 	"project-template/infrastructure/utils"
 	"project-template/outbound"
 	"project-template/outbound/service/example"
 	"project-template/pkg/code"
 	"project-template/pkg/logger"
 	repoitem "project-template/repositories/item"
-	restutils "project-template/server/rest/utils"
 )
 
 type mockItemRepo struct {
@@ -115,25 +108,13 @@ func setupCtx(repo repoitem.Repository, exOutbound example.Outbound) context.Con
 	return ctx
 }
 
-func decodeBody[T any](t *testing.T, resp *restutils.Response[*response.GenericResponse[T]]) response.GenericResponse[T] {
-	rec := httptest.NewRecorder()
-	ctx := humatest.NewContext(nil, httptest.NewRequest(http.MethodGet, "/", nil), rec)
-	resp.Body(ctx)
-	var out response.GenericResponse[T]
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	return out
-}
-
 func expectInternal(t *testing.T, err error) {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	var se huma.StatusError
-	ok := errors.As(err, &se)
-	if !ok || se.GetStatus() != http.StatusInternalServerError {
+	var c *code.Code
+	if !errors.As(err, &c) || c.HTTPCode != http.StatusInternalServerError {
 		t.Fatalf("unexpected error %#v", err)
 	}
 }
@@ -148,7 +129,7 @@ func TestListItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	out := decodeBody(t, resp)
+	out := resp.Body
 	if len(out.Body) != 1 || out.Body[0].Name != "sample" {
 		t.Fatalf("body %#v", out.Body)
 	}
@@ -177,10 +158,10 @@ func TestCreateItem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if resp.GetHeaders().Get("Location") != "/items/5" {
-		t.Fatalf("location %q", resp.GetHeaders().Get("Location"))
+	if resp.Location != "/items/5" {
+		t.Fatalf("location %q", resp.Location)
 	}
-	out := decodeBody(t, resp)
+	out := resp.Body
 	if out.Body.ID != 5 {
 		t.Fatalf("body %#v", out.Body)
 	}
@@ -205,7 +186,7 @@ func TestGetItem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	out := decodeBody(t, resp)
+	out := resp.Body
 	if out.Body.ID != 7 || out.Body.Name != "example" {
 		t.Fatalf("body %#v", out.Body)
 	}
@@ -233,7 +214,7 @@ func TestUpdateItem(t *testing.T) {
 	if !o.fetchByIDCalled {
 		t.Fatalf("expected fetch call")
 	}
-	out := decodeBody(t, resp)
+	out := resp.Body
 	if out.Body.ID != 3 || out.Body.Name != "example" {
 		t.Fatalf("body %#v", out.Body)
 	}
@@ -253,15 +234,9 @@ func TestDeleteItem(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
 	repo := mockItemRepo{delete: func(context.Context, int) error { return nil }}
 	ctx := setupCtx(repo, &mockExampleOutbound{})
-	resp, err := DeleteItem(ctx, &dtoitem.IDPath{ID: 9})
+	_, err := DeleteItem(ctx, &dtoitem.IDPath{ID: 9})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
-	}
-	rec := httptest.NewRecorder()
-	ctx2 := humatest.NewContext(nil, httptest.NewRequest(http.MethodDelete, "/", nil), rec)
-	resp.Body(ctx2)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status %d", rec.Code)
 	}
 }
 

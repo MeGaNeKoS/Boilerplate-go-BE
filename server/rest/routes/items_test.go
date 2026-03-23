@@ -4,9 +4,10 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/adapters/humachi"
-	"github.com/danielgtaylor/huma/v2/humatest"
+	"github.com/MeGaNeKoS/neoma/core"
+	neomachi "github.com/MeGaNeKoS/neoma/adapters/neomachi/v5"
+	"github.com/MeGaNeKoS/neoma/middleware"
+	"github.com/MeGaNeKoS/neoma/neoma"
 	"github.com/go-chi/chi/v5"
 
 	"project-template/infrastructure/config"
@@ -14,10 +15,10 @@ import (
 
 func TestItemsRouter(t *testing.T) {
 	r := chi.NewRouter()
-	cfg := huma.DefaultConfig("x", "1")
+	cfg := neoma.DefaultConfig("x", "1")
 	cfg.CreateHooks = nil
-	api := humachi.New(r, cfg)
-	ItemsRouter(huma.NewGroup(api, "/items"))
+	api := neomachi.New(r, cfg)
+	ItemsRouter(middleware.NewGroup(api, "/items"))
 	got := map[string]bool{}
 	err := chi.Walk(r, func(method string, route string, handler http.Handler, middlewares ...func(http.Handler) http.Handler) error {
 		got[method+" "+route] = true
@@ -35,11 +36,11 @@ func TestItemsRouter(t *testing.T) {
 
 func TestItemsRouterValidation(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	_, api := humatest.New(t)
-	ItemsRouter(huma.NewGroup(api, "/items"))
+	api := neomachi.New(chi.NewRouter(), neoma.DefaultConfig("test", "1"))
+	ItemsRouter(middleware.NewGroup(api, "/items"))
 	spec := api.OpenAPI()
 	op := spec.Paths["/items"].Get
-	var limit *huma.Param
+	var limit *core.Param
 	for _, p := range op.Parameters {
 		if p.Name == "limit" && p.In == "query" {
 			limit = p

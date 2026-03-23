@@ -20,7 +20,6 @@ func RecoverMiddleware(global logger.Logger) func(http.Handler) http.Handler {
 					stack := make([]byte, 8192)
 					n := runtime.Stack(stack, false)
 
-					// Use request logger if possible
 					reqLog := utils.GetLoggerFromContext(r.Context())
 					if reqLog == nil {
 						reqLog = global
@@ -29,8 +28,7 @@ func RecoverMiddleware(global logger.Logger) func(http.Handler) http.Handler {
 					reqLog.ErrorF("Recovered panic: %v\nStack trace:\n%s", err, stack[:n])
 					w.Header().Set("X-Recovered-By", "RecoverMiddleware")
 
-					respond(w, utils.GenerateErrorResponse(code.ErrInternalServerError).
-						WithInstance(r.URL.Path))
+					writeError(w, code.ErrInternalServerError)
 					if flusher, ok := w.(http.Flusher); ok {
 						flusher.Flush()
 					}

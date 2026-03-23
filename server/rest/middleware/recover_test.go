@@ -10,9 +10,9 @@ import (
 	"github.com/bouk/monkey"
 
 	"project-template/infrastructure/config"
-	"project-template/infrastructure/dto/response"
 	"project-template/infrastructure/supervisor"
 	"project-template/infrastructure/utils"
+	"project-template/server/rest"
 )
 
 type stubLogger struct{}
@@ -33,6 +33,7 @@ func (stubLogger) CloseLogFile()                 {}
 
 func TestRecoverMiddleware(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP", LogTarget: config.LogConfig{Path: t.TempDir(), FileName: "app.log"}}
+	rest.Init("APP")
 
 	mw := RecoverMiddleware(stubLogger{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		panic("boom")
@@ -51,26 +52,21 @@ func TestRecoverMiddleware(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
 		t.Fatalf("expected application/problem+json, got %q", ct)
 	}
-	var pd response.ProblemDetail
-	if err := json.NewDecoder(rec.Body).Decode(&pd); err != nil {
-		t.Fatalf("failed to decode problem detail: %v", err)
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
 	}
-	if pd.Status != http.StatusInternalServerError {
-		t.Fatalf("expected status 500, got %d", pd.Status)
+	if body["type"] != "about:blank" {
+		t.Fatalf("expected type about:blank, got %v", body["type"])
 	}
-	if pd.Title == "" {
-		t.Fatal("title is empty")
-	}
-	if pd.Type == "" {
-		t.Fatal("type is empty")
-	}
-	if pd.Instance != "/test-path" {
-		t.Fatalf("expected instance /test-path, got %q", pd.Instance)
+	if body["detail"] != "Internal server error" {
+		t.Fatalf("expected detail 'Internal server error', got %v", body["detail"])
 	}
 }
 
 func TestRecoverMiddlewareWithReqLoggerAndRestartError(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP", LogTarget: config.LogConfig{Path: t.TempDir(), FileName: "app.log"}}
+	rest.Init("APP")
 
 	var restartCalled bool
 	monkey.Patch(supervisor.RequestRestart, func() error {
@@ -98,15 +94,12 @@ func TestRecoverMiddlewareWithReqLoggerAndRestartError(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
 		t.Fatalf("expected application/problem+json, got %q", ct)
 	}
-	var pd response.ProblemDetail
-	if err := json.NewDecoder(rec.Body).Decode(&pd); err != nil {
-		t.Fatalf("failed to decode problem detail: %v", err)
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
 	}
-	if pd.Status != http.StatusInternalServerError {
-		t.Fatalf("expected status 500, got %d", pd.Status)
-	}
-	if pd.Instance != "/panic-path" {
-		t.Fatalf("expected instance /panic-path, got %q", pd.Instance)
+	if body["type"] != "about:blank" {
+		t.Fatalf("expected type about:blank, got %v", body["type"])
 	}
 	if !restartCalled {
 		t.Fatal("restart not called")

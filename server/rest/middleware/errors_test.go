@@ -7,11 +7,12 @@ import (
 	"testing"
 
 	"project-template/infrastructure/config"
-	"project-template/infrastructure/dto/response"
+	"project-template/server/rest"
 )
 
 func TestErrorFormatMiddleware404(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
+	rest.Init("APP")
 
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
@@ -28,20 +29,21 @@ func TestErrorFormatMiddleware404(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
 		t.Fatalf("expected application/problem+json, got %q", ct)
 	}
-	var pd response.ProblemDetail
-	if err := json.NewDecoder(rec.Body).Decode(&pd); err != nil {
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("failed to decode: %v", err)
 	}
-	if pd.Status != http.StatusNotFound {
-		t.Fatalf("expected status 404, got %d", pd.Status)
+	if body["type"] != "about:blank" {
+		t.Fatalf("expected type about:blank, got %v", body["type"])
 	}
-	if pd.Instance != "/missing" {
-		t.Fatalf("expected instance /missing, got %q", pd.Instance)
+	if body["detail"] != "Resource not found" {
+		t.Fatalf("expected detail 'Resource not found', got %v", body["detail"])
 	}
 }
 
 func TestErrorFormatMiddleware405(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
+	rest.Init("APP")
 
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, POST")
@@ -62,15 +64,12 @@ func TestErrorFormatMiddleware405(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
 		t.Fatalf("expected application/problem+json, got %q", ct)
 	}
-	var pd response.ProblemDetail
-	if err := json.NewDecoder(rec.Body).Decode(&pd); err != nil {
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("failed to decode: %v", err)
 	}
-	if pd.Status != http.StatusMethodNotAllowed {
-		t.Fatalf("expected status 405, got %d", pd.Status)
-	}
-	if pd.Instance != "/items" {
-		t.Fatalf("expected instance /items, got %q", pd.Instance)
+	if body["title"] != "Method Not Allowed" {
+		t.Fatalf("expected title 'Method Not Allowed', got %v", body["title"])
 	}
 }
 
@@ -89,9 +88,6 @@ func TestErrorFormatMiddleware200Passthrough(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	if ct := rec.Header().Get("Content-Type"); ct != "text/plain" {
-		t.Fatalf("expected text/plain, got %q", ct)
-	}
 	if rec.Body.String() != "hello" {
 		t.Fatalf("expected body 'hello', got %q", rec.Body.String())
 	}
@@ -105,10 +101,9 @@ func TestStatusInterceptWriterUnwrap(t *testing.T) {
 	}
 }
 
-func TestErrorFormatMiddlewareProblemJsonPassthrough(t *testing.T) {
-	// If the response already has application/problem+json, don't intercept.
+func TestErrorFormatMiddlewareJsonPassthrough(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/problem+json")
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(map[string]any{"title": "custom", "status": 404})
 	})

@@ -56,7 +56,7 @@ func TestUploadFileIntegration(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("code %d", rec.Code)
+		t.Fatalf("code %d, body: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -152,7 +152,7 @@ func TestFormWithFileIntegrationBadForm(t *testing.T) {
 	req.Header.Set("Content-Type", "multipart/form-data")
 	rec := httptest.NewRecorder()
 	srv.Handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnprocessableEntity {
+	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("code %d", rec.Code)
 	}
 }

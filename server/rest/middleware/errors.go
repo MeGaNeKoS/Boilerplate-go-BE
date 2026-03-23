@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"strings"
 
-	"project-template/infrastructure/utils"
 	"project-template/pkg/code"
 )
 
@@ -19,8 +18,8 @@ type statusInterceptWriter struct {
 func (w *statusInterceptWriter) WriteHeader(statusCode int) {
 	w.status = statusCode
 	if statusCode == http.StatusNotFound || statusCode == http.StatusMethodNotAllowed {
-		// Skip if the response is already problem+json (e.g. from huma).
-		if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/problem+json") {
+		// Skip if the response already has a JSON content type (e.g. from neoma).
+		if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "json") {
 			w.intercepted = true
 			return
 		}
@@ -57,7 +56,6 @@ func ErrorFormatMiddleware(next http.Handler) http.Handler {
 			errCode = code.ErrMethodNotAllowed
 		}
 
-		respond(w, utils.GenerateErrorResponse(errCode).
-			WithInstance(r.URL.Path))
+		writeError(w, errCode)
 	})
 }

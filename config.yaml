@@ -17,11 +17,6 @@ Server:
   JWT:
     PrivateKey: ""
     PublicKey: ""
-  InternalCIDRs:
-    - "10.0.0.0/8"
-    - "172.16.0.0/12"
-    - "192.168.0.0/16"
-    - "127.0.0.0/8"
 REST:
   Host: "0.0.0.0"
   Port: "8080"
@@ -33,11 +28,11 @@ Kafka:
   GroupID: "item-consumer"
   Topic: "items"
 Database:
-  Host: ""
-  Port: ""
-  User: ""
-  Password: ""
-  DBName: ""
+  Host: "db"
+  Port: "3306"
+  User: "app"
+  Password: "app"
+  DBName: "boilerplate"
   MigrationPath: "file://migrations"
   DirtyStrategy: "retry"
 LogTarget:
@@ -47,7 +42,7 @@ LogTarget:
   VerboseLevel: "DEBUG"
   AlsoLogToStdout: true
 OpenAPI:
-  Version: "3.0.3"
+  Version: "3.2.0"
   Docs:
     Public:
       url: "/docs/public"
@@ -55,8 +50,6 @@ OpenAPI:
     Internal:
       url: "/docs/internal"
       schema: "/schema"
-    Renderer: "stoplight"
-  # Base URLs used in generated OpenAPI docs and schema IDs.
   Servers:
-    Public: "https://localhost:8080"
+    Public: "http://192.168.1.134:8888"
     Internal: ""

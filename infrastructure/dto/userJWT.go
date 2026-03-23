@@ -37,18 +37,18 @@ func (p *RootPermission) hasAction(action string) bool {
 	return false
 }
 
-func (p *RootPermission) CanCreateTicket() bool {
+func (p *RootPermission) CanCreateItem() bool {
 	return p.hasAction("create") && p.hasAction("read")
 }
 
-func (p *RootPermission) CanReadTicket() bool {
+func (p *RootPermission) CanReadItem() bool {
 	return p.hasAction("read")
 }
 
-func (p *RootPermission) CanUpdateTicket() bool {
+func (p *RootPermission) CanUpdateItem() bool {
 	return p.hasAction("update") && p.hasAction("read")
 }
 
-func (p *RootPermission) CanDeleteTicket() bool {
+func (p *RootPermission) CanDeleteItem() bool {
 	return p.hasAction("delete") && p.hasAction("read")
 }

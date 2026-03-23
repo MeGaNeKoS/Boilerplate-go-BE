@@ -7,20 +7,20 @@ func TestRootPermissionActions(t *testing.T) {
 	if !rp.hasAction("create") || !rp.hasAction("update") {
 		t.Fatalf("hasAction failed")
 	}
-	if rp.CanCreateTicket() != true {
-		t.Fatalf("CanCreateTicket failed")
+	if rp.CanCreateItem() != true {
+		t.Fatalf("CanCreateItem failed")
 	}
-	if !rp.CanReadTicket() {
-		t.Fatalf("CanReadTicket failed")
+	if !rp.CanReadItem() {
+		t.Fatalf("CanReadItem failed")
 	}
-	if !rp.CanUpdateTicket() {
-		t.Fatalf("CanUpdateTicket failed")
+	if !rp.CanUpdateItem() {
+		t.Fatalf("CanUpdateItem failed")
 	}
-	if !rp.CanDeleteTicket() {
-		t.Fatalf("CanDeleteTicket failed")
+	if !rp.CanDeleteItem() {
+		t.Fatalf("CanDeleteItem failed")
 	}
 	rp = RootPermission{Action: []string{"read"}}
-	if rp.CanCreateTicket() || rp.CanUpdateTicket() || rp.CanDeleteTicket() {
+	if rp.CanCreateItem() || rp.CanUpdateItem() || rp.CanDeleteItem() {
 		t.Fatalf("permissions incorrectly granted")
 	}
 }
@@ -49,7 +49,7 @@ func TestEmptyPermissions(t *testing.T) {
 	if rp.hasAction("read") {
 		t.Fatalf("hasAction should return false for empty actions")
 	}
-	if rp.CanCreateTicket() || rp.CanReadTicket() || rp.CanUpdateTicket() || rp.CanDeleteTicket() {
+	if rp.CanCreateItem() || rp.CanReadItem() || rp.CanUpdateItem() || rp.CanDeleteItem() {
 		t.Fatalf("all permissions should be false with empty actions")
 	}
 }

@@ -35,44 +35,6 @@ func TestWithHeaderOverwrite(t *testing.T) {
 	}
 }
 
-func TestWithInstanceProblemDetail(t *testing.T) {
-	pd := ProblemDetail{Title: "err", Status: 400}
-	r := &HttpResponse{RawResponsePayload: pd}
-	got := r.WithInstance("/api/test")
-	if got != r {
-		t.Fatal("WithInstance should return the same pointer")
-	}
-	updated, ok := r.RawResponsePayload.(ProblemDetail)
-	if !ok {
-		t.Fatal("payload should still be ProblemDetail")
-	}
-	if updated.Instance != "/api/test" {
-		t.Fatalf("expected instance /api/test, got %s", updated.Instance)
-	}
-}
-
-func TestWithInstanceNonProblemDetail(t *testing.T) {
-	r := &HttpResponse{RawResponsePayload: "plain string"}
-	got := r.WithInstance("/api/test")
-	if got != r {
-		t.Fatal("WithInstance should return the same pointer")
-	}
-	if r.RawResponsePayload != "plain string" {
-		t.Fatal("payload should be unchanged for non-ProblemDetail")
-	}
-}
-
-func TestWithInstanceNilPayload(t *testing.T) {
-	r := &HttpResponse{}
-	got := r.WithInstance("/api/test")
-	if got != r {
-		t.Fatal("WithInstance should return the same pointer")
-	}
-	if r.RawResponsePayload != nil {
-		t.Fatal("nil payload should remain nil")
-	}
-}
-
 func TestGenericResponse(t *testing.T) {
 	resp := GenericResponse[string]{
 		BaseResponse: BaseResponse{StatusCode: "200", ReturnMessage: "OK"},

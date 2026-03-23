@@ -48,7 +48,6 @@ type ServerConfig struct {
 	Duration      int            `yaml:"Duration"`
 	Endpoint      EndpointConfig `yaml:"Endpoint"`
 	JWT           JWTConfig      `yaml:"JWT"`
-	InternalCIDRs []string       `yaml:"InternalCIDRs"`
 }
 
 // ListenerConfig holds host and port details for a network listener.

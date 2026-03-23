@@ -2,20 +2,15 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"testing"
 
-	"github.com/danielgtaylor/huma/v2/humatest"
+	"github.com/MeGaNeKoS/neoma/core"
 
 	"project-template/infrastructure/config"
-	"project-template/infrastructure/dto/response"
-	systemdto "project-template/infrastructure/dto/system"
 	"project-template/pkg/code"
-	restutils "project-template/server/rest/utils"
+	systemdto "project-template/server/rest/dto/system"
 )
 
 type mockSystemService struct {
@@ -44,27 +39,16 @@ func (m mockSystemService) Long(ctx context.Context, s int) (any, *code.Code) {
 	return nil, nil
 }
 
-func decodeSys[T any](t *testing.T, resp *restutils.Response[*response.GenericResponse[T]]) response.GenericResponse[T] {
-	rec := httptest.NewRecorder()
-	ctx := humatest.NewContext(nil, httptest.NewRequest(http.MethodGet, "/", nil), rec)
-	resp.Body(ctx)
-	var out response.GenericResponse[T]
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	return out
-}
-
 func TestEcho(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
 	orig := systemService
 	systemService = mockSystemService{echo: func(context.Context) (any, *code.Code) { return "ok", nil }}
 	defer func() { systemService = orig }()
-	resp, err := Echo(context.Background(), &restutils.Empty{})
+	resp, err := Echo(context.Background(), &core.Empty{})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	out := decodeSys(t, resp)
+	out := resp.Body
 	if out.Body != "ok" {
 		t.Fatalf("body %#v", out.Body)
 	}
@@ -74,7 +58,7 @@ func TestEchoError(t *testing.T) {
 	orig := systemService
 	systemService = mockSystemService{echo: func(context.Context) (any, *code.Code) { return nil, code.ErrInternalServerError }}
 	defer func() { systemService = orig }()
-	if _, err := Echo(context.Background(), &restutils.Empty{}); err == nil {
+	if _, err := Echo(context.Background(), &core.Empty{}); err == nil {
 		t.Fatalf("expected error")
 	}
 }
@@ -88,7 +72,7 @@ func TestCrash(t *testing.T) {
 			t.Fatalf("expected panic")
 		}
 	}()
-	_, _ = Crash(context.Background(), &restutils.Empty{})
+	_, _ = Crash(context.Background(), &core.Empty{})
 }
 
 func TestLong(t *testing.T) {
@@ -101,7 +85,7 @@ func TestLong(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	out := decodeSys(t, resp)
+	out := resp.Body
 	if out.Body != pid {
 		t.Fatalf("body %#v", out.Body)
 	}
@@ -120,7 +104,7 @@ func TestEchoTypeAssertionFailure(t *testing.T) {
 	orig := systemService
 	systemService = mockSystemService{echo: func(context.Context) (any, *code.Code) { return 42, nil }}
 	defer func() { systemService = orig }()
-	_, err := Echo(context.Background(), &restutils.Empty{})
+	_, err := Echo(context.Background(), &core.Empty{})
 	if err == nil {
 		t.Fatalf("expected error for non-string return")
 	}

@@ -259,7 +259,7 @@ func TestSendHTTPRequestErrors(t *testing.T) {
 	// buildURL error
 	o := &HTTPOutbound{Host: "https://x", Path: "/", Method: http.MethodGet, QueryParam: "bad", Response: &struct{}{}}
 	_, code := o.SendHTTPRequest(stubHTTPLogger{})
-	if code == nil || code.InternalCode != codepkg.ErrCreateRequestUrl.InternalCode {
+	if code == nil || code.Message != codepkg.ErrCreateRequestUrl.Message {
 		t.Fatalf("expected url error")
 	}
 	if strings.Contains(code.Message, "https://") {
@@ -269,7 +269,7 @@ func TestSendHTTPRequestErrors(t *testing.T) {
 	// marshal body error
 	o = &HTTPOutbound{Host: "https://x", Path: "/", Method: http.MethodGet, Body: make(chan int), Response: &struct{}{}}
 	_, code = o.SendHTTPRequest(stubHTTPLogger{})
-	if code == nil || code.InternalCode != codepkg.ErrCreateRequestPayload.InternalCode {
+	if code == nil || code.Message != codepkg.ErrCreateRequestPayload.Message {
 		t.Fatalf("expected payload error")
 	}
 	if strings.Contains(code.Message, "https://") {
@@ -279,7 +279,7 @@ func TestSendHTTPRequestErrors(t *testing.T) {
 	// build request error
 	o = &HTTPOutbound{Host: "https://x", Path: "/", Method: "bad\n", Response: &struct{}{}}
 	_, code = o.SendHTTPRequest(stubHTTPLogger{})
-	if code == nil || code.InternalCode != codepkg.ErrCreateRequestHeaders.InternalCode {
+	if code == nil || code.Message != codepkg.ErrCreateRequestHeaders.Message {
 		t.Fatalf("expected request error")
 	}
 	if strings.Contains(code.Message, "https://") {
@@ -289,7 +289,7 @@ func TestSendHTTPRequestErrors(t *testing.T) {
 	// send error
 	o = &HTTPOutbound{Host: "https://127.0.0.1:1", Path: "/", Method: http.MethodGet, Response: &struct{}{}}
 	_, code = o.SendHTTPRequest(stubHTTPLogger{})
-	if code == nil || code.InternalCode != codepkg.ErrFireExternalRequestFailed.InternalCode {
+	if code == nil || code.Message != codepkg.ErrFireExternalRequestFailed.Message {
 		t.Fatalf("expected send error")
 	}
 	if strings.Contains(code.Message, "https://") {

@@ -4,20 +4,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
-	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	neomachi "github.com/MeGaNeKoS/neoma/adapters/neomachi/v5"
+	"github.com/MeGaNeKoS/neoma/core"
 	"github.com/golang-jwt/jwt/v4"
 
 	"project-template/infrastructure/config"
 	"project-template/infrastructure/dto"
-	"project-template/infrastructure/dto/response"
 	"project-template/infrastructure/utils"
 	"project-template/pkg/code"
-	"project-template/server/rest/routes"
+	"project-template/server/rest"
 )
 
 // AuthMiddleware validates the Authorization header and stores the user info in
@@ -37,27 +35,23 @@ func AuthMiddleware(next http.Handler) http.Handler {
 
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if token == "" {
-			wwwAuth := fmt.Sprintf(`Bearer realm="%s"`, realm)
-			respond(w, utils.GenerateErrorResponse(code.ErrMissingToken).
-				WithHeader("WWW-Authenticate", wwwAuth).
-				WithInstance(r.URL.Path))
+			h := http.Header{}
+			h.Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s"`, realm))
+			writeError(w, code.ErrMissingToken, h)
 			return
 		}
 
 		var user dto.JWTUser
 		if err := utils.GetJWTService().ParseJWT(token, &user); err != nil {
 			log.ErrorF("This token invalid because: %v", err)
+			h := http.Header{}
 			var ve *jwt.ValidationError
 			if errors.As(err, &ve) && ve.Errors&jwt.ValidationErrorExpired != 0 {
-				wwwAuth := fmt.Sprintf(`Bearer realm="%s", error="invalid_token", error_description="The access token expired"`, realm)
-				respond(w, utils.GenerateErrorResponse(code.ErrTokenExpired).
-					WithHeader("WWW-Authenticate", wwwAuth).
-					WithInstance(r.URL.Path))
+				h.Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s", error="invalid_token", error_description="The access token expired"`, realm))
+				writeError(w, code.ErrTokenExpired, h)
 			} else {
-				wwwAuth := fmt.Sprintf(`Bearer realm="%s", error="invalid_token", error_description="The token is invalid"`, realm)
-				respond(w, utils.GenerateErrorResponse(code.ErrInvalidToken).
-					WithHeader("WWW-Authenticate", wwwAuth).
-					WithInstance(r.URL.Path))
+				h.Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s", error="invalid_token", error_description="The token is invalid"`, realm))
+				writeError(w, code.ErrInvalidToken, h)
 			}
 			return
 		}
@@ -67,31 +61,13 @@ func AuthMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// HumaAuthMiddleware returns a Huma-compatible middleware that wraps the native
-// AuthMiddleware and registers the security scheme on the provided group.
-func HumaAuthMiddleware(g *huma.Group) func(huma.Context, func(huma.Context)) {
-	api := g.API
-	comps := api.OpenAPI().Components
-	if comps.SecuritySchemes == nil {
-		comps.SecuritySchemes = map[string]*huma.SecurityScheme{}
-	}
-	if _, ok := comps.SecuritySchemes[routes.BearerScheme]; !ok {
-		comps.SecuritySchemes[routes.BearerScheme] = &huma.SecurityScheme{
-			Type:         "http",
-			Scheme:       "bearer",
-			BearerFormat: "JWT",
-		}
-	}
-	routes.UseSecurity(g, routes.BearerScheme)
-	return wrapHTTPMiddleware(AuthMiddleware)
-}
 
-// wrapHTTPMiddleware adapts a standard HTTP middleware for use with Huma by
+// WrapHTTPMiddleware adapts a standard HTTP middleware for use with neoma by
 // unwrapping the request/response and invoking the next handler if the middleware
 // chain continues.
-func wrapHTTPMiddleware(mw func(http.Handler) http.Handler) func(huma.Context, func(huma.Context)) {
-	return func(ctx huma.Context, next func(huma.Context)) {
-		req, w := humachi.Unwrap(ctx)
+func WrapHTTPMiddleware(mw func(http.Handler) http.Handler) func(core.Context, func(core.Context)) {
+	return func(ctx core.Context, next func(core.Context)) {
+		req, w := neomachi.Unwrap(ctx)
 		called := false
 		mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			*req = *r
@@ -104,31 +80,18 @@ func wrapHTTPMiddleware(mw func(http.Handler) http.Handler) func(huma.Context, f
 	}
 }
 
-func respond(w http.ResponseWriter, resp *response.HttpResponse) {
-	ct := resp.ContentType
-	if ct == "" {
-		ct = "application/json"
+// writeError writes an error using the standard envelope format.
+// Optional headers (e.g. WWW-Authenticate) are applied before writing.
+func writeError(w http.ResponseWriter, c *code.Code, headers ...http.Header) {
+	for _, h := range headers {
+		for k, values := range h {
+			for _, v := range values {
+				w.Header().Add(k, v)
+			}
+		}
 	}
-	for k, v := range resp.Headers {
-		w.Header().Set(k, v)
-	}
-	w.Header().Set("Content-Type", ct)
-	w.WriteHeader(resp.HTTPCode)
-	if resp.RawResponsePayload == nil {
-		return
-	}
-	if strings.Contains(ct, "json") {
-		_ = json.NewEncoder(w).Encode(resp.RawResponsePayload)
-		return
-	}
-	switch p := resp.RawResponsePayload.(type) {
-	case []byte:
-		_, _ = w.Write(p)
-	case string:
-		_, _ = w.Write([]byte(p))
-	case io.Reader:
-		_, _ = io.Copy(w, p)
-	default:
-		_ = json.NewEncoder(w).Encode(p)
-	}
+
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(c.HTTPCode)
+	_ = json.NewEncoder(w).Encode(rest.ErrorEnvelope(c.HTTPCode, c.Message))
 }

@@ -17,11 +17,6 @@ Server:
   JWT:
     PrivateKey: ""
     PublicKey: ""
-  InternalCIDRs:
-    - "10.0.0.0/8"
-    - "172.16.0.0/12"
-    - "192.168.0.0/16"
-    - "127.0.0.0/8"
 REST:
   Host: "0.0.0.0"
   Port: "8080"
@@ -47,7 +42,7 @@ LogTarget:
   VerboseLevel: "DEBUG"
   AlsoLogToStdout: true
 OpenAPI:
-  Version: "3.0.3"
+  Version: "3.2.0"
   # Directory where generated OpenAPI specs and JSON schemas are written.
   # Defaults to "." (current working directory) when empty.
   OutputDir: "."

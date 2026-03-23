@@ -3,23 +3,20 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
-	"unsafe"
 
-	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/humatest"
+	neomachi "github.com/MeGaNeKoS/neoma/adapters/neomachi/v5"
+	"github.com/MeGaNeKoS/neoma/core"
 
 	"project-template/infrastructure/config"
-	"project-template/infrastructure/dto/files"
-	"project-template/infrastructure/dto/response"
+	"project-template/server/rest/dto/files"
+	"project-template/pkg/code"
 )
 
 // stubFile implements multipart.File in memory.
@@ -27,31 +24,15 @@ type stubFile struct{ *bytes.Reader }
 
 func (stubFile) Close() error { return nil }
 
-func setUploadData(m *huma.MultipartFormFiles[files.UploadForm], data *files.UploadForm) {
-	v := reflect.ValueOf(m).Elem().FieldByName("data")
-	reflect.NewAt(v.Type(), unsafe.Pointer(v.UnsafeAddr())).Elem().Set(reflect.ValueOf(data))
-}
-
-func setFormData(m *huma.MultipartFormFiles[files.FormBody], data *files.FormBody) {
-	v := reflect.ValueOf(m).Elem().FieldByName("data")
-	reflect.NewAt(v.Type(), unsafe.Pointer(v.UnsafeAddr())).Elem().Set(reflect.ValueOf(data))
-}
-
 func TestUploadFile(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
 	in := &files.UploadInput{}
-	setUploadData(&in.RawBody, &files.UploadForm{File: huma.FormFile{File: &stubFile{bytes.NewReader([]byte("data"))}, IsSet: true}})
+	in.Body.File = core.FormFile{File: &stubFile{bytes.NewReader([]byte("data"))}}
 	resp, err := UploadFile(context.Background(), in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := httptest.NewRecorder()
-	ctx := humatest.NewContext(nil, httptest.NewRequest(http.MethodPost, "/", nil), rec)
-	resp.Body(ctx)
-	var out response.GenericResponse[files.UploadOutput]
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatal(err)
-	}
+	out := resp.Body
 	if out.Body.Message != "uploaded" {
 		t.Fatalf("body %#v", out.Body)
 	}
@@ -83,20 +64,20 @@ func TestDownloadFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := httptest.NewRecorder()
-	ctx := humatest.NewContext(nil, httptest.NewRequest(http.MethodGet, "/", nil), rec)
-	resp.Body(ctx)
+	ctx := neomachi.NewContext(nil, httptest.NewRequest(http.MethodGet, "/", nil), rec)
+	resp.Body(ctx, nil)
 	if !bytes.Equal(rec.Body.Bytes(), expected) {
 		t.Fatalf("body %s", rec.Body.Bytes())
 	}
-	disp := resp.GetHeaders().Get("Content-Disposition")
+	disp := resp.ContentDisposition
 	if disp == "" {
 		t.Fatalf("missing disposition")
 	}
 	if !strings.Contains(disp, `filename="`) {
 		t.Fatalf("filename not quoted in Content-Disposition: %s", disp)
 	}
-	if resp.GetHeaders().Get("Content-Type") != "text/plain; charset=utf-8" {
-		t.Fatalf("content type %q", resp.GetHeaders().Get("Content-Type"))
+	if resp.ContentType != "text/plain; charset=utf-8" {
+		t.Fatalf("content type %q", resp.ContentType)
 	}
 }
 
@@ -114,8 +95,8 @@ func TestDownloadFileNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	var herr huma.StatusError
-	if !errors.As(err, &herr) || herr.GetStatus() != http.StatusNotFound {
+	var herr *code.Code
+	if !errors.As(err, &herr) || herr.HTTPCode != http.StatusNotFound {
 		t.Fatalf("status %v", err)
 	}
 }
@@ -129,8 +110,8 @@ func TestDownloadFileInternalError(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	var herr huma.StatusError
-	if !errors.As(err, &herr) || herr.GetStatus() != http.StatusInternalServerError {
+	var herr *code.Code
+	if !errors.As(err, &herr) || herr.HTTPCode != http.StatusInternalServerError {
 		t.Fatalf("status %v", err)
 	}
 }
@@ -159,7 +140,7 @@ func TestDownloadFileMimeFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ct := resp.GetHeaders().Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+	if ct := resp.ContentType; ct != "text/plain; charset=utf-8" {
 		t.Fatalf("content type %q", ct)
 	}
 }
@@ -167,18 +148,13 @@ func TestDownloadFileMimeFallback(t *testing.T) {
 func TestFormWithFile(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
 	in := &files.FormInput{}
-	setFormData(&in.RawBody, &files.FormBody{Name: "bob", Attachment: huma.FormFile{File: &stubFile{bytes.NewReader([]byte("data"))}, IsSet: true}})
+	in.Body.Name = "bob"
+	in.Body.Attachment = core.FormFile{File: &stubFile{bytes.NewReader([]byte("data"))}}
 	resp, err := FormWithFile(context.Background(), in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := httptest.NewRecorder()
-	ctx := humatest.NewContext(nil, httptest.NewRequest(http.MethodPost, "/", nil), rec)
-	resp.Body(ctx)
-	var out response.GenericResponse[files.FormOutput]
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatal(err)
-	}
+	out := resp.Body
 	if out.Body.Name != "bob" {
 		t.Fatalf("body %#v", out.Body)
 	}
@@ -186,19 +162,7 @@ func TestFormWithFile(t *testing.T) {
 
 func TestFormWithFileError(t *testing.T) {
 	config.Cfg = &config.Config{AppName: "APP"}
-	in := &files.FormInput{}
-	setFormData(&in.RawBody, &files.FormBody{Name: "x"})
-	_, err := FormWithFile(context.Background(), in)
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-}
-
-func TestFormWithFileMissingFile(t *testing.T) {
-	config.Cfg = &config.Config{AppName: "APP"}
-	in := &files.FormInput{}
-	setFormData(&in.RawBody, &files.FormBody{Name: "a"})
-	_, err := FormWithFile(context.Background(), in)
+	_, err := FormWithFile(context.Background(), &files.FormInput{})
 	if err == nil {
 		t.Fatalf("expected error")
 	}
